@@ -9,27 +9,47 @@ import { ProtectedRoute } from "@/routes/ProtectedRoute";
 
 // Auth Pages
 import { LoginPage } from "@/pages/auth/LoginPage";
+import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
 import UnauthorizedPage from "@/pages/UnauthorizedPage";
 import NotFound from "@/pages/NotFound";
 
 // Super Admin Pages
 import { SuperAdminDashboard } from "@/pages/superadmin/SuperAdminDashboard";
+import ClientManagementPage from "@/pages/superadmin/ClientManagementPage";
+import BillingPlansPage from "@/pages/superadmin/BillingPlansPage";
+import SystemSettingsPage from "@/pages/superadmin/SystemSettingsPage";
+import AuditLogsPage from "@/pages/superadmin/AuditLogsPage";
 
 // Client Admin Pages
 import { ClientAdminDashboard } from "@/pages/client/ClientAdminDashboard";
 import { OrdersPage } from "@/pages/client/OrdersPage";
 import { DeliveriesPage } from "@/pages/client/DeliveriesPage";
 import { CustomersPage } from "@/pages/client/CustomersPage";
+import InvoicesPage from "@/pages/client/InvoicesPage";
+import InventoryPage from "@/pages/client/InventoryPage";
+import ReportsPage from "@/pages/client/ReportsPage";
+import EmployeesPage from "@/pages/client/EmployeesPage";
+import ClientSettingsPage from "@/pages/client/SettingsPage";
 
 // Site Manager Pages
 import { SiteManagerDashboard } from "@/pages/manager/SiteManagerDashboard";
+import CreateOrderPage from "@/pages/manager/CreateOrderPage";
+import ManagerOrdersPage from "@/pages/manager/OrdersPage";
+import SiteInventoryPage from "@/pages/manager/SiteInventoryPage";
 
 // Driver Pages
 import { DriverDashboard } from "@/pages/driver/DriverDashboard";
+import DeliveryQueuePage from "@/pages/driver/DeliveryQueuePage";
+import DeliveryDetailPage from "@/pages/driver/DeliveryDetailPage";
+
+// Customer Pages
+import CustomerDashboard from "@/pages/customer/CustomerDashboard";
+import PlaceOrderPage from "@/pages/customer/PlaceOrderPage";
+import OrderHistoryPage from "@/pages/customer/OrderHistoryPage";
+import WalletPage from "@/pages/customer/WalletPage";
 
 const queryClient = new QueryClient();
 
-// Component to handle root redirect based on auth state
 const RootRedirect = () => {
   const { user, isAuthenticated, isLoading } = useAuth();
   
@@ -54,20 +74,20 @@ const RootRedirect = () => {
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* Root redirect */}
       <Route path="/" element={<RootRedirect />} />
       
       {/* Public routes */}
       <Route path={ROUTES.LOGIN} element={<LoginPage />} />
+      <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
       
       {/* Super Admin routes */}
       <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
         <Route path={ROUTES.SUPER_ADMIN.DASHBOARD} element={<SuperAdminDashboard />} />
-        <Route path={ROUTES.SUPER_ADMIN.CLIENTS} element={<SuperAdminDashboard />} />
-        <Route path={ROUTES.SUPER_ADMIN.BILLING} element={<SuperAdminDashboard />} />
-        <Route path={ROUTES.SUPER_ADMIN.SETTINGS} element={<SuperAdminDashboard />} />
-        <Route path={ROUTES.SUPER_ADMIN.AUDIT_LOGS} element={<SuperAdminDashboard />} />
+        <Route path={ROUTES.SUPER_ADMIN.CLIENTS} element={<ClientManagementPage />} />
+        <Route path={ROUTES.SUPER_ADMIN.BILLING} element={<BillingPlansPage />} />
+        <Route path={ROUTES.SUPER_ADMIN.SETTINGS} element={<SystemSettingsPage />} />
+        <Route path={ROUTES.SUPER_ADMIN.AUDIT_LOGS} element={<AuditLogsPage />} />
       </Route>
       
       {/* Client Admin routes */}
@@ -76,28 +96,36 @@ const AppRoutes = () => {
         <Route path={ROUTES.CLIENT_ADMIN.ORDERS} element={<OrdersPage />} />
         <Route path={ROUTES.CLIENT_ADMIN.DELIVERIES} element={<DeliveriesPage />} />
         <Route path={ROUTES.CLIENT_ADMIN.CUSTOMERS} element={<CustomersPage />} />
-        <Route path={ROUTES.CLIENT_ADMIN.INVOICES} element={<ClientAdminDashboard />} />
-        <Route path={ROUTES.CLIENT_ADMIN.INVENTORY} element={<ClientAdminDashboard />} />
-        <Route path={ROUTES.CLIENT_ADMIN.REPORTS} element={<ClientAdminDashboard />} />
-        <Route path={ROUTES.CLIENT_ADMIN.EMPLOYEES} element={<ClientAdminDashboard />} />
-        <Route path={ROUTES.CLIENT_ADMIN.SETTINGS} element={<ClientAdminDashboard />} />
+        <Route path={ROUTES.CLIENT_ADMIN.INVOICES} element={<InvoicesPage />} />
+        <Route path={ROUTES.CLIENT_ADMIN.INVENTORY} element={<InventoryPage />} />
+        <Route path={ROUTES.CLIENT_ADMIN.REPORTS} element={<ReportsPage />} />
+        <Route path={ROUTES.CLIENT_ADMIN.EMPLOYEES} element={<EmployeesPage />} />
+        <Route path={ROUTES.CLIENT_ADMIN.SETTINGS} element={<ClientSettingsPage />} />
       </Route>
       
       {/* Site Manager routes */}
       <Route element={<ProtectedRoute allowedRoles={['site_manager', 'client_admin', 'super_admin']} />}>
         <Route path={ROUTES.SITE_MANAGER.DASHBOARD} element={<SiteManagerDashboard />} />
-        <Route path={ROUTES.SITE_MANAGER.CREATE_ORDER} element={<SiteManagerDashboard />} />
-        <Route path={ROUTES.SITE_MANAGER.ORDERS} element={<SiteManagerDashboard />} />
-        <Route path={ROUTES.SITE_MANAGER.INVENTORY} element={<SiteManagerDashboard />} />
+        <Route path={ROUTES.SITE_MANAGER.CREATE_ORDER} element={<CreateOrderPage />} />
+        <Route path={ROUTES.SITE_MANAGER.ORDERS} element={<ManagerOrdersPage />} />
+        <Route path={ROUTES.SITE_MANAGER.INVENTORY} element={<SiteInventoryPage />} />
       </Route>
       
       {/* Driver routes */}
       <Route element={<ProtectedRoute allowedRoles={['driver', 'site_manager', 'client_admin', 'super_admin']} />}>
         <Route path={ROUTES.DRIVER.DASHBOARD} element={<DriverDashboard />} />
-        <Route path={ROUTES.DRIVER.DELIVERIES} element={<DriverDashboard />} />
+        <Route path={ROUTES.DRIVER.DELIVERIES} element={<DeliveryQueuePage />} />
+        <Route path={ROUTES.DRIVER.DELIVERY_DETAIL} element={<DeliveryDetailPage />} />
       </Route>
       
-      {/* Catch-all */}
+      {/* Customer routes */}
+      <Route element={<ProtectedRoute allowedRoles={['customer', 'site_manager', 'client_admin', 'super_admin']} />}>
+        <Route path={ROUTES.CUSTOMER.DASHBOARD} element={<CustomerDashboard />} />
+        <Route path={ROUTES.CUSTOMER.PLACE_ORDER} element={<PlaceOrderPage />} />
+        <Route path={ROUTES.CUSTOMER.ORDER_HISTORY} element={<OrderHistoryPage />} />
+        <Route path={ROUTES.CUSTOMER.WALLET} element={<WalletPage />} />
+      </Route>
+      
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
