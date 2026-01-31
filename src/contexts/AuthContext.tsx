@@ -48,6 +48,17 @@ const mockUsers: Record<string, User & { password: string }> = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
+  'customer@aquatrack.com': {
+    id: '5',
+    email: 'customer@aquatrack.com',
+    password: 'customer123',
+    firstName: 'Sarah',
+    lastName: 'Customer',
+    role: 'customer',
+    clientId: 'client-001',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
