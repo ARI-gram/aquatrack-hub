@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ROUTES, roleDefaultRoutes } from "@/constants/routes";
+import { CUSTOMER_ROUTES } from "@/constants/customerRoutes";
 import { ProtectedRoute } from "@/routes/ProtectedRoute";
 
 // Auth Pages
@@ -47,6 +48,13 @@ import CustomerDashboard from "@/pages/customer/CustomerDashboard";
 import PlaceOrderPage from "@/pages/customer/PlaceOrderPage";
 import OrderHistoryPage from "@/pages/customer/OrderHistoryPage";
 import WalletPage from "@/pages/customer/WalletPage";
+import CustomerLoginPage from "@/pages/customer/auth/CustomerLoginPage";
+import CustomerRegisterPage from "@/pages/customer/auth/CustomerRegisterPage";
+import ProfilePage from "@/pages/customer/ProfilePage";
+import AddressesPage from "@/pages/customer/AddressesPage";
+import NotificationsPage from "@/pages/customer/NotificationsPage";
+import SupportPage from "@/pages/customer/SupportPage";
+import BottlesPage from "@/pages/customer/BottlesPage";
 
 const queryClient = new QueryClient();
 
@@ -80,6 +88,10 @@ const AppRoutes = () => {
       <Route path={ROUTES.LOGIN} element={<LoginPage />} />
       <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
+      
+      {/* Customer public auth routes */}
+      <Route path={CUSTOMER_ROUTES.LOGIN} element={<CustomerLoginPage />} />
+      <Route path={CUSTOMER_ROUTES.REGISTER} element={<CustomerRegisterPage />} />
       
       {/* Super Admin routes */}
       <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
@@ -120,10 +132,15 @@ const AppRoutes = () => {
       
       {/* Customer routes */}
       <Route element={<ProtectedRoute allowedRoles={['customer', 'site_manager', 'client_admin', 'super_admin']} />}>
-        <Route path={ROUTES.CUSTOMER.DASHBOARD} element={<CustomerDashboard />} />
-        <Route path={ROUTES.CUSTOMER.PLACE_ORDER} element={<PlaceOrderPage />} />
-        <Route path={ROUTES.CUSTOMER.ORDER_HISTORY} element={<OrderHistoryPage />} />
-        <Route path={ROUTES.CUSTOMER.WALLET} element={<WalletPage />} />
+        <Route path={CUSTOMER_ROUTES.DASHBOARD} element={<CustomerDashboard />} />
+        <Route path={CUSTOMER_ROUTES.PLACE_ORDER} element={<PlaceOrderPage />} />
+        <Route path={CUSTOMER_ROUTES.ORDER_HISTORY} element={<OrderHistoryPage />} />
+        <Route path={CUSTOMER_ROUTES.WALLET} element={<WalletPage />} />
+        <Route path={CUSTOMER_ROUTES.BOTTLES} element={<BottlesPage />} />
+        <Route path={CUSTOMER_ROUTES.PROFILE} element={<ProfilePage />} />
+        <Route path={CUSTOMER_ROUTES.ADDRESSES} element={<AddressesPage />} />
+        <Route path={CUSTOMER_ROUTES.NOTIFICATIONS} element={<NotificationsPage />} />
+        <Route path={CUSTOMER_ROUTES.SUPPORT} element={<SupportPage />} />
       </Route>
       
       <Route path="*" element={<NotFound />} />
