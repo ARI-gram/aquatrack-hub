@@ -74,7 +74,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   }, []);
 
-  const login = useCallback(async (credentials: LoginCredentials) => {
+  const login = useCallback(async (emailOrCredentials: string | LoginCredentials, password?: string) => {
+    const credentials: LoginCredentials = typeof emailOrCredentials === 'string' 
+      ? { email: emailOrCredentials, password: password! }
+      : emailOrCredentials;
     setIsLoading(true);
     
     // Simulate API call delay

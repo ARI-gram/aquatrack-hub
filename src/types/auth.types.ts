@@ -24,7 +24,7 @@ export interface LoginCredentials {
 }
 
 export interface AuthContextType extends AuthState {
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (emailOrCredentials: string | LoginCredentials, password?: string) => Promise<void>;
   logout: () => void;
   hasPermission: (requiredRole: UserRole | UserRole[]) => boolean;
 }
