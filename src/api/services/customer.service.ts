@@ -2,7 +2,7 @@
  * Customer Service
  * Handles customer profile and account operations
  */
-
+// /src/api/services/customer.service.ts
 import axiosInstance from '../axios.config';
 import { CUSTOMER_API_ENDPOINTS } from '../customerEndpoints';
 import {

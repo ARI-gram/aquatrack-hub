@@ -2,7 +2,7 @@
  * BottleHistory Component
  * Displays bottle transaction history
  */
-
+// /src/components/customer/BottleTracker/BottleHistory.tsx
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

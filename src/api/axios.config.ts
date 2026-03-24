@@ -1,11 +1,5 @@
-/**
- * Axios Configuration
- * Configures the HTTP client with interceptors for authentication and error handling
- */
-
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
-// Create axios instance with default config
 const axiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: Number(import.meta.env.VITE_API_TIMEOUT) || 30000,
@@ -14,71 +8,111 @@ const axiosInstance = axios.create({
   },
 });
 
-/**
- * Request interceptor
- * Adds authentication token to requests
- */
+// ─── Public endpoints — never attach a Bearer token ──────────────────────────
+const PUBLIC_ENDPOINTS = [
+  '/customer/auth/send-otp/',
+  '/customer/auth/verify-otp/',
+  '/customers/invite/',
+];
+
+const isPublicEndpoint = (url: string | undefined): boolean => {
+  if (!url) return false;
+  return PUBLIC_ENDPOINTS.some((path) => url.includes(path));
+};
+
+// ─── Read role BEFORE any clearing ───────────────────────────────────────────
+const getStoredRole = (): string | null => {
+  try {
+    const stored = localStorage.getItem('aquatrack_user');
+    if (!stored) return null;
+    return JSON.parse(stored)?.role ?? null;
+  } catch {
+    return null;
+  }
+};
+
+// ─── Centralised session clear ────────────────────────────────────────────────
+const clearSession = () => {
+  localStorage.removeItem('aquatrack_token');
+  localStorage.removeItem('aquatrack_refresh_token');
+  localStorage.removeItem('aquatrack_user');
+  localStorage.removeItem('customer_data');
+};
+
+// ─── Soft logout via custom event ────────────────────────────────────────────
+// Instead of window.location.href (hard reload that wipes React state and
+// causes the "logged in → dashboard → back to login" flash), we dispatch
+// a custom event that AuthContext listens to and handles with React Router.
+// This keeps the React tree alive and lets the router do a clean navigation.
+const dispatchSessionExpired = (isCustomer: boolean) => {
+  window.dispatchEvent(
+    new CustomEvent('aquatrack:session-expired', {
+      detail: { isCustomer },
+    })
+  );
+};
+
+// ─── Request interceptor ─────────────────────────────────────────────────────
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (isPublicEndpoint(config.url)) return config;
     const token = localStorage.getItem('aquatrack_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error: AxiosError) => {
-    return Promise.reject(error);
-  }
+  (error: AxiosError) => Promise.reject(error),
 );
 
-/**
- * Response interceptor
- * Handles token refresh and error responses
- */
+// ─── Response interceptor ────────────────────────────────────────────────────
 axiosInstance.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+    };
 
-    // Handle 401 Unauthorized - Token expired
-    if (error.response?.status === 401 && originalRequest) {
-      // Attempt token refresh
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+
       const refreshToken = localStorage.getItem('aquatrack_refresh_token');
-      
+
       if (refreshToken) {
+        // Read role BEFORE clearing anything
+        const role       = getStoredRole();
+        const isCustomer = role === 'customer';
+
         try {
-          const response = await axios.post(
-            `${import.meta.env.VITE_API_BASE_URL}/auth/refresh-token`,
-            { refreshToken }
-          );
-          
-          const { token } = response.data;
-          localStorage.setItem('aquatrack_token', token);
-          
-          // Retry original request with new token
+          const refreshUrl = `${import.meta.env.VITE_API_BASE_URL || '/api'}/auth/refresh-token/`;
+
+          const response = await axios.post(refreshUrl, { refresh: refreshToken });
+          const { access } = response.data;
+          localStorage.setItem('aquatrack_token', access);
+
           if (originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
+            originalRequest.headers.Authorization = `Bearer ${access}`;
           }
           return axiosInstance(originalRequest);
-        } catch (refreshError) {
-          // Refresh failed - clear tokens and redirect to login
-          localStorage.removeItem('aquatrack_token');
-          localStorage.removeItem('aquatrack_refresh_token');
-          localStorage.removeItem('aquatrack_user');
-          window.location.href = '/login';
+        } catch {
+          // Refresh failed — clear then navigate softly (no hard reload)
+          clearSession();
+          dispatchSessionExpired(isCustomer);
         }
+      } else {
+        // No refresh token
+        const role       = getStoredRole();
+        const isCustomer = role === 'customer';
+        clearSession();
+        dispatchSessionExpired(isCustomer);
       }
     }
 
-    // Handle other errors
-    if (error.response?.status === 403) {
-      console.error('Access forbidden');
-    } else if (error.response?.status === 500) {
-      console.error('Server error');
-    }
+    if (error.response?.status === 403) console.error('Access forbidden');
+    else if (error.response?.status === 500) console.error('Server error');
 
     return Promise.reject(error);
-  }
+  },
 );
 
 export default axiosInstance;

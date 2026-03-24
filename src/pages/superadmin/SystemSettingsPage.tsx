@@ -1,10 +1,4 @@
-/**
- * System Settings Page
- * Role: Super Admin
- * Route: /admin/settings
- * System-wide configuration and settings
- */
-
+// /src/pages/superadmin/SystemSettingsPage.tsx
 import React, { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card } from '@/components/ui/card';

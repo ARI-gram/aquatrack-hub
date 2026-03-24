@@ -1,5 +1,7 @@
+// src/pages/auth/LoginPage.tsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { isAxiosError } from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { roleDefaultRoutes } from '@/constants/routes';
 import { Button } from '@/components/ui/button';
@@ -9,12 +11,62 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Droplets, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+/**
+ * Extracts a human-readable error message from any error thrown during login.
+ * Handles Axios HTTP errors (with Django REST Framework error shapes),
+ * plain Error objects, and unknown values.
+ */
+function getLoginErrorMessage(error: unknown): string {
+  // Axios error — read the backend response body
+  if (isAxiosError(error)) {
+    const data = error.response?.data;
+
+    if (data) {
+      // DRF non-field validation errors: { "non_field_errors": ["..."] }
+      if (Array.isArray(data.non_field_errors) && data.non_field_errors.length > 0) {
+        return data.non_field_errors[0] as string;
+      }
+
+      // DRF detail string: { "detail": "..." }
+      if (typeof data.detail === 'string') {
+        return data.detail;
+      }
+
+      // DRF field errors — join the first message from each field
+      // e.g. { "email": ["This field is required."] }
+      const fieldMessages = Object.values(data)
+        .flatMap((v) => (Array.isArray(v) ? v : [v]))
+        .filter((v): v is string => typeof v === 'string');
+
+      if (fieldMessages.length > 0) {
+        return fieldMessages[0];
+      }
+    }
+
+    // Fallback to the HTTP status text
+    if (error.response?.statusText) {
+      return error.response.statusText;
+    }
+
+    // Network error (no response at all)
+    return 'Unable to reach the server. Please check your connection.';
+  }
+
+  // Standard JS Error
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  // Completely unknown
+  return 'An unexpected error occurred. Please try again.';
+}
+
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const { login } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -22,21 +74,21 @@ export const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       await login({ email, password });
-      
+
       // Get user from localStorage after login
       const storedUser = localStorage.getItem('aquatrack_user');
       if (storedUser) {
-        const user = JSON.parse(storedUser);
-        const redirectPath = roleDefaultRoutes[user.role as keyof typeof roleDefaultRoutes];
+        const user = JSON.parse(storedUser) as { role: keyof typeof roleDefaultRoutes };
+        const redirectPath = roleDefaultRoutes[user.role];
         navigate(redirectPath);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast({
         title: 'Login Failed',
-        description: error instanceof Error ? error.message : 'Invalid credentials',
+        description: getLoginErrorMessage(error),
         variant: 'destructive',
       });
     } finally {
@@ -66,7 +118,7 @@ export const LoginPage: React.FC = () => {
           <div className="absolute top-1/2 left-0 w-[200%] h-32 bg-white/10 rounded-full animate-water-wave" style={{ animationDelay: '2s' }} />
           <div className="absolute top-3/4 left-0 w-[200%] h-24 bg-white/5 rounded-full animate-water-wave" style={{ animationDelay: '4s' }} />
         </div>
-        
+
         <div className="relative z-10 flex flex-col justify-center p-12 text-white">
           <div className="flex items-center gap-4 mb-8">
             <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-sm shadow-glow">
@@ -77,15 +129,16 @@ export const LoginPage: React.FC = () => {
               <p className="text-white/80">Water Distribution Management</p>
             </div>
           </div>
-          
+
           <div className="space-y-6 max-w-md">
             <h2 className="text-3xl font-semibold leading-tight">
               Streamline your water distribution operations
             </h2>
             <p className="text-lg text-white/80">
-              Manage orders, track deliveries, and grow your business with our comprehensive SaaS platform designed for water distributors.
+              Manage orders, track deliveries, and grow your business with our
+              comprehensive SaaS platform designed for water distributors.
             </p>
-            
+
             <div className="grid grid-cols-2 gap-4 pt-4">
               <div className="p-4 rounded-xl bg-white/10 backdrop-blur-sm">
                 <div className="text-3xl font-bold">500+</div>
@@ -135,7 +188,7 @@ export const LoginPage: React.FC = () => {
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <div className="relative">
@@ -154,7 +207,11 @@ export const LoginPage: React.FC = () => {
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -207,7 +264,9 @@ export const LoginPage: React.FC = () => {
                     className="text-left p-2 rounded-lg hover:bg-secondary transition-colors text-sm"
                   >
                     <div className="font-medium text-foreground">{account.role}</div>
-                    <div className="text-xs text-muted-foreground truncate">{account.email}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {account.email}
+                    </div>
                   </button>
                 ))}
               </div>

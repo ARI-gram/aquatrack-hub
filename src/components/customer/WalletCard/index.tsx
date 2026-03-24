@@ -2,7 +2,7 @@
  * WalletCard Component
  * Displays wallet balance and quick actions
  */
-
+// /src/components/customer/WalletCard/index.tsx
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

@@ -2,7 +2,7 @@
  * PricingCalculator Component
  * Real-time price calculation display
  */
-
+// /src/components/customer/PricingCalculator/index.tsx
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

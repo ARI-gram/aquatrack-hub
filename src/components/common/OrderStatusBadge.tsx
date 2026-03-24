@@ -1,3 +1,4 @@
+// /src/components/common/OrderStatusBadge.tsx
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { OrderStatus, PaymentStatus, orderStatusConfig, paymentStatusConfig } from '@/types/order.types';

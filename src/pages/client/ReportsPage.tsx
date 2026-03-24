@@ -1,12 +1,13 @@
 /**
  * Reports Page
- * Role: Client Admin
+ * Role: Client Admin / Site Manager
  * Route: /client/reports
  * Business reports and analytics
  */
 
 import React, { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { ManagerLayout }   from '@/components/layout/ManagerLayout';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -68,11 +69,24 @@ const paymentMethodData = [
   { name: 'Credit Account', value: 15, color: 'hsl(var(--warning))' },
 ];
 
-const ReportsPage: React.FC = () => {
+interface ReportsPageProps {
+  layout?:   'dashboard' | 'manager';
+  readOnly?: boolean;
+}
+
+const ReportsPage: React.FC<ReportsPageProps> = ({
+  layout   = 'dashboard',
+  readOnly = false,
+}) => {
   const [dateRange, setDateRange] = useState('month');
 
+  const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+    layout === 'manager'
+      ? <ManagerLayout title="Reports" subtitle="Business analytics and insights">{children}</ManagerLayout>
+      : <DashboardLayout title="Reports" subtitle="Business analytics and insights">{children}</DashboardLayout>;
+
   return (
-    <DashboardLayout title="Reports" subtitle="Business analytics and insights">
+    <Wrapper>
       {/* Date Range & Export */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between mb-6">
         <div className="flex items-center gap-4">
@@ -89,10 +103,12 @@ const ReportsPage: React.FC = () => {
             </SelectContent>
           </Select>
         </div>
-        <Button variant="outline">
-          <Download className="h-4 w-4 mr-2" />
-          Export Report
-        </Button>
+        {!readOnly && (
+          <Button variant="outline">
+            <Download className="h-4 w-4 mr-2" />
+            Export Report
+          </Button>
+        )}
       </div>
 
       {/* Summary Stats */}
@@ -303,7 +319,7 @@ const ReportsPage: React.FC = () => {
           </div>
         </TabsContent>
       </Tabs>
-    </DashboardLayout>
+    </Wrapper>
   );
 };
 

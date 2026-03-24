@@ -2,7 +2,7 @@
  * Customer Authentication Service
  * Handles customer-specific authentication flows
  */
-
+// /src/api/services/customerAuth.service.ts
 import axiosInstance from '../axios.config';
 import { CUSTOMER_API_ENDPOINTS } from '../customerEndpoints';
 import type { CustomerRegistrationData, CustomerLoginData } from '@/types/customer.types';

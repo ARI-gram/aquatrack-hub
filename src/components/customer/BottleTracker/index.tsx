@@ -2,7 +2,7 @@
  * BottleTracker Component
  * Visual display of customer's bottle inventory
  */
-
+// /src/components/customer/BottleTracker/index.tsx 
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

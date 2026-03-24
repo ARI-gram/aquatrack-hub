@@ -2,7 +2,7 @@
  * OrderWizard Component
  * Multi-step order placement flow
  */
-
+// /src/components/customer/OrderWizard/index.tsx
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

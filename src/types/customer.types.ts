@@ -2,7 +2,7 @@
  * Customer Portal Type Definitions
  * Types for customer accounts, profiles, and preferences
  */
-
+// /src/types/customer.types.ts
 export enum CustomerType {
   REFILL_CUSTOMER = 'REFILL',
   ONETIME_CUSTOMER = 'ONETIME',

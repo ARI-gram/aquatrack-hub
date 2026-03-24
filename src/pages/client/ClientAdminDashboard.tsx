@@ -1,3 +1,4 @@
+// /src/pages/client/ClientAdminDashboard.tsx
 import React from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatCard } from '@/components/common/StatCard';
