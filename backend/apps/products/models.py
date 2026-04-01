@@ -264,6 +264,22 @@ class BottleMovement(models.Model):
         help_text='Walk-in name if no customer account',
     )
 
+    # ── Sales fields (for DIRECT_SALE movements) ──────────────────────────────
+    unit_price = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Sale price per unit — only for DIRECT_SALE',
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text='Total sale amount — only for DIRECT_SALE',
+    )
+    payment_method = models.CharField(
+        max_length=20, blank=True, default='CASH',
+        help_text='Payment method — only for DIRECT_SALE',
+    )
+
     # ── Meta ──────────────────────────────────────────────────────────────────
     notes = models.TextField(blank=True)
     recorded_by = models.ForeignKey(
@@ -337,6 +353,23 @@ class ConsumableMovement(models.Model):
         related_name='consumable_movements',
     )
     customer_name = models.CharField(max_length=200, blank=True)
+
+    # ── Sales fields (for DIRECT_SALE movements) ──────────────────────────────
+    unit_price = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Sale price per unit — only for DIRECT_SALE',
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text='Total sale amount — only for DIRECT_SALE',
+    )
+    payment_method = models.CharField(
+        max_length=20, blank=True, default='CASH',
+        help_text='Payment method — only for DIRECT_SALE',
+    )
+
     supplier_name = models.CharField(
         max_length=200, blank=True,
         help_text='Supplier name for RECEIVE movements',

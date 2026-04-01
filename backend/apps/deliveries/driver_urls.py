@@ -48,24 +48,27 @@ urlpatterns = [
          views.DriverResendOTPView.as_view(),
          name='resend-otp'),
 
-    # POST /api/driver/deliveries/{id}/
-    path('customers/',
-         views.DriverCustomerListView.as_view(),
-         name='customer-list'),
-
-    # GET  /api/driver/customers/search/?q=...
-    path('customers/search/',
-         views.DriverCustomerSearchView.as_view(),
-         name='customer-search'),
-
-    # POST /api/driver/store/direct-sales/
-    path('store/direct-sales/',
-         driver_store_views.ClientDirectSalesView.as_view(),
-         name='store-direct-sales'),
     # POST /api/driver/deliveries/{id}/complete/
     path('deliveries/<str:delivery_id>/complete/',
          views.DriverCompleteDeliveryView.as_view(),
          name='complete-delivery'),
+
+    # ── Customers ─────────────────────────────────────────────────────────────
+
+    # GET /api/driver/customers/
+    path('customers/',
+         views.DriverCustomerListView.as_view(),
+         name='customer-list'),
+
+    # GET /api/driver/customers/search/?q=...
+    path('customers/search/',
+         views.DriverCustomerSearchView.as_view(),
+         name='customer-search'),
+
+    # GET /api/driver/customers/{id}/
+    path('customers/<str:customer_id>/',
+         views.DriverCustomerDetailView.as_view(),
+         name='customer-detail'),
 
     # ── Driver profile ────────────────────────────────────────────────────────
 
@@ -100,4 +103,9 @@ urlpatterns = [
     path('store/use/',
          driver_store_views.DriverRecordStockUseView.as_view(),
          name='store-use'),
+
+    # POST /api/driver/store/direct-sales/
+    path('store/direct-sales/',
+         driver_store_views.ClientDirectSalesView.as_view(),
+         name='store-direct-sales'),
 ]

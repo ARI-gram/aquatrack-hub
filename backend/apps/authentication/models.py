@@ -82,6 +82,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Vehicle registration number (drivers only)"
     )
 
+    must_change_password = models.BooleanField(default=False)
+    password_changed_at = models.DateTimeField(null=True, blank=True)
+
     # Personal information
     first_name = models.CharField(
         max_length=100,

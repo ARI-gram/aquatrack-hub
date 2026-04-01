@@ -572,11 +572,17 @@ const PlaceOrderPage: React.FC = () => {
     }, 0);
 
   /** Total delivery fees across all cart items */
-  const cartDeliveryTotal = () =>
-    Object.entries(cart).reduce((sum, [id, qty]) => {
-      const p = products.find(p => p.id === id);
-      return sum + productDeliveryFee(p!) * qty;
-    }, 0);
+  const cartDeliveryTotal = () => {
+    let maxFee = 0;
+    for (const [id, qty] of Object.entries(cart)) {
+      if (qty > 0) {
+        const p = products.find(p => p.id === id);
+        const fee = p ? productDeliveryFee(p) : 0;
+        if (fee > maxFee) maxFee = fee;
+      }
+    }
+    return maxFee;
+  };
 
   const cartCount    = () => Object.values(cart).reduce((s, q) => s + q, 0);
   const orderTotal   = () => cartSubtotal() + cartDeliveryTotal();
@@ -942,10 +948,10 @@ const PlaceOrderPage: React.FC = () => {
                         <div className="flex justify-between text-xs">
                           <span className="flex items-center gap-1 text-muted-foreground/70">
                             <Truck className="h-3 w-3" />
-                            {fee > 0 ? `Delivery ×${qty}` : 'Free delivery'}
+                            {fee > 0 ? `Delivery fee: KES ${fee.toLocaleString()}` : 'Free delivery'}
                           </span>
-                          <span className={fee > 0 ? 'text-muted-foreground' : 'text-emerald-600 font-medium'}>
-                            {fee > 0 ? `KES ${lineFee.toLocaleString()}` : 'Free'}
+                          <span className="text-xs text-muted-foreground/50 italic">
+                            {fee > 0 ? '(highest fee charged once)' : ''}
                           </span>
                         </div>
                       </div>

@@ -41,6 +41,50 @@ export type {
   DirectSaleConsumableRequest,
 } from '@/types/store.types';
 
+// ── Driver van stock ──────────────────────────────────────────────────────────
+
+export interface DriverVanBottleItem {
+  product_id:    string;
+  product_name:  string;
+  selling_price: string | null;
+  balance: {
+    full:    number;
+    empty:   number;
+    damaged: number;
+    missing: number;
+  };
+}
+
+export interface DriverVanConsumableItem {
+  product_id:    string;
+  product_name:  string;
+  unit:          string;
+  selling_price: string | null;
+  balance: {
+    in_stock: number;
+  };
+}
+
+export interface DriverVanStock {
+  driver_id:      string;
+  driver_name:    string;
+  vehicle_number: string;
+  total_items:    number;
+  bottles:        DriverVanBottleItem[];
+  consumables:    DriverVanConsumableItem[];
+}
+
+export const driverVanStockService = {
+  /**
+   * GET /api/store/driver-stock/
+   * Returns current van inventory for every active driver in the client.
+   */
+  async getAll(): Promise<DriverVanStock[]> {
+    const r = await axiosInstance.get<DriverVanStock[]>('/store/driver-stock/');
+    return unwrapArray<DriverVanStock>(r.data);
+  },
+};
+
 // ── Response wrappers ─────────────────────────────────────────────────────────
 
 interface BottleMovementResponse {
@@ -141,11 +185,21 @@ export const bottleStoreService = {
    *
    * Backend: DirectSaleBottleView.post()
    */
-  async directSale(data: DirectSaleBottleRequest): Promise<BottleMovementResponse> {
-    const r = await axiosInstance.post<BottleMovementResponse>(
-      '/store/bottles/direct-sale/',
-      data,
-    );
+
+  async directSale(data: {
+    product:        string;
+    quantity:       number;
+    customer_id?:   string;
+    customer_name?: string;
+    qty_collected?: number;
+    notes?:         string;
+  }): Promise<{
+    movement:      BottleMovement;
+    balance:       BottleBalance;
+    qty_collected: number;
+    outstanding:   number;
+  }> {
+    const r = await axiosInstance.post('/store/bottles/direct-sale/', data);
     return r.data;
   },
 };

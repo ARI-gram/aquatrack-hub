@@ -21,6 +21,8 @@ export interface User {
   clientId?:  string;
   createdAt:  string;
   updatedAt:  string;
+  must_change_password: boolean;
+  password_changed_at: string | null;
 }
 
 export interface AuthState {

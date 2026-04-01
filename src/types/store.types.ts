@@ -143,6 +143,7 @@ export interface DirectSaleBottleRequest {
   quantity:      number;
   customer_id?:  string;
   customer_name?: string;
+  qty_collected?: number;
   notes?:        string;
 }
 

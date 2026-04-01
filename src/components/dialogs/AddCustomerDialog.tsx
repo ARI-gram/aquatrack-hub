@@ -43,6 +43,7 @@ const schema = z.object({
     .regex(/^\+/, 'Must include country code, e.g. +254712345678'),
   email:         z.string().email('Enter a valid email address'),
   customer_type: z.enum(['REFILL', 'ONETIME', 'HYBRID']),
+  send_invite:   z.boolean().default(true),  // ← DIFF 1
 
   // Credit fields
   enable_credit:    z.boolean().default(false),
@@ -95,6 +96,7 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
       phone_number:     '',
       email:            '',
       customer_type:    'REFILL',
+      send_invite:      true,   // ← DIFF 2
       enable_credit:    false,
       billing_cycle:    undefined,
       credit_limit:     0,
@@ -128,11 +130,13 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
   const onSubmit = async (data: FormValues) => {
     setIsLoading(true);
     try {
+      // ← DIFF 4: include send_invite in payload
       const payload: CreateCustomerRequest = {
         full_name:     data.full_name,
         phone_number:  data.phone_number,
         email:         data.email,
         customer_type: data.customer_type,
+        send_invite:   data.send_invite,
       };
 
       if (data.enable_credit && data.billing_cycle) {
@@ -169,7 +173,7 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
         <DialogHeader>
           <DialogTitle>Add Customer</DialogTitle>
           <DialogDescription>
-            Create a customer account and send them an email invite to complete registration.
+            Create a customer account and optionally send them an email invite to complete registration.
           </DialogDescription>
         </DialogHeader>
 
@@ -247,11 +251,45 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
                   </div>
                 </FormControl>
                 <p className="text-xs text-muted-foreground mt-1">
-                  The invite link will be sent to this address.
+                  {form.watch('send_invite')
+                    ? 'The invite link will be sent to this address.'
+                    : 'Used for login — no email will be sent.'}
                 </p>
                 <FormMessage />
               </FormItem>
             )} />
+
+            {/* ── DIFF 3: Invite setting toggle ────────────────────────────── */}
+            <div className="rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between bg-muted/20">
+                <div className="flex items-center gap-2.5">
+                  <Mail className="h-4 w-4 text-primary" />
+                  <div>
+                    <p className="text-sm font-semibold">Send Invite Email</p>
+                    <p className="text-xs text-muted-foreground">
+                      {form.watch('send_invite')
+                        ? 'An invite link will be sent so they can activate their account'
+                        : 'No email sent — admin manages orders for this customer'}
+                    </p>
+                  </div>
+                </div>
+                <FormField control={form.control} name="send_invite" render={({ field }) => (
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                )} />
+              </div>
+              {!form.watch('send_invite') && (
+                <div className="px-4 py-2.5 bg-blue-50 border-t border-blue-100">
+                  <p className="text-[11px] text-blue-700 flex items-center gap-1.5">
+                    <Info className="h-3 w-3 shrink-0" />
+                    The customer can still log in later at any time using their phone number and email.
+                    Orders can be placed manually on their behalf from the Orders page.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* ── Credit / Cheque Account ───────────────────────────────────── */}
             <div className="border rounded-xl overflow-hidden">
@@ -396,6 +434,7 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
               )}
             </div>
 
+            {/* ── DIFF 5: Dynamic submit button label ──────────────────────── */}
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
                 Cancel
@@ -404,10 +443,10 @@ export const AddCustomerDialog: React.FC<AddCustomerDialogProps> = ({
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating & Sending Invite…
+                    {form.watch('send_invite') ? 'Creating & Sending Invite…' : 'Adding Customer…'}
                   </>
                 ) : (
-                  'Create & Send Invite'
+                  form.watch('send_invite') ? 'Create & Send Invite' : 'Add Customer'
                 )}
               </Button>
             </DialogFooter>

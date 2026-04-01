@@ -1,800 +1,552 @@
 /**
- * src/pages/client/DirectSalesPage.tsx
- * Route: /client/direct-sales
+ * Products Page
+ * Role: Client Admin
+ * Route: /client/products
+ * src/pages/client/ProductsPage.tsx
  *
- * Unified view of ALL direct sales:
- *  - Driver roadside sales  (from driver stock movements)
- *  - Admin / client-admin sales (from bottle + consumable store history)
- *    → "Admin" replaces "Store" — shows recorded_by_name as the seller
- *
- * Fixes:
- *  ✅ Newest-first sort applied consistently after every merge/filter step
- *  ✅ Today/Yesterday headers use local date comparison (not UTC)
- *  ✅ groupByDate runs on the already-sorted list so groups are correct
- *  ✅ filtered list is re-sorted after source/search filter applied
- *  ✅ Date filter uses startOf/endOf local day to avoid timezone edge cases
- *  ✅ source 'store' renamed to 'admin'; seller shown as recorded_by_name
+ * Catalogue only — create, edit, hide/show, archive products.
+ * Stock operations (Add Stock, Distribute) live in the Store page.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Input }  from '@/components/ui/input';
-import { Badge }  from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import React, { useState, useEffect, useCallback } from 'react';
+import { DashboardLayout }  from '@/components/layout/DashboardLayout';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button }           from '@/components/ui/button';
+import { Input }            from '@/components/ui/input';
+import { Badge }            from '@/components/ui/badge';
+import { Switch }           from '@/components/ui/switch';
 import {
-  Select, SelectContent, SelectItem,
-  SelectTrigger, SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  ShoppingBag, Droplets, Package, Loader2,
-  Search, RefreshCw, InboxIcon, User,
-  Phone, X, TrendingUp, Users, Calendar,
-  UserCog, Truck,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  Plus, Search, Package, MoreHorizontal, Eye, EyeOff,
+  Pencil, Trash2, Loader2, Droplets, AlertTriangle,
+  Grid3X3, LayoutGrid, List, AlignJustify, RotateCcw,
 } from 'lucide-react';
-import { driverStoreService }                          from '@/api/services/driver-store.service';
-import { bottleStoreService, consumableStoreService }  from '@/api/services/store.service';
-import axiosInstance                                   from '@/api/axios.config';
-import { toast }                                       from 'sonner';
-import { cn }                                          from '@/lib/utils';
-import { format }                                      from 'date-fns';
+import { useToast }            from '@/hooks/use-toast';
+import { useAuth }             from '@/contexts/AuthContext';
+import {
+  productsService,
+  type Product,
+} from '@/api/services/products.service';
+import { CreateProductDialog } from '@/components/dialogs/CreateProductDialog';
+import { ConfirmDialog }       from '@/components/dialogs/ConfirmDialog';
+import { cn }                  from '@/lib/utils';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+// ── View mode ─────────────────────────────────────────────────────────────────
 
-export interface DirectSale {
-  id:                  string;
-  movement_date:       string;
-  product_name:        string;
-  product_type:        'bottle' | 'consumable';
-  quantity:            number;
-  driver_name?:        string;
-  driver_id?:          string;
-  recorded_by_name?:   string | null;
-  customer_name?:      string;
-  notes:               string;
-  source:              'driver' | 'admin';  // ← 'store' removed, now 'admin'
-}
+type ViewMode = 'grid' | 'list' | 'compact';
 
-interface DriverOption {
-  id:   string;
-  name: string;
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-interface StoreHistoryItem {
-  id:                string;
-  movement_type:     string;
-  movement_date:     string;
-  product_name?:     string;
-  driver_name?:      string | null;
-  customer_name?:    string;
-  recorded_by_name?: string | null;
-  notes?:            string;
-  qty_total?:        number;
-  quantity?:         number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Parse an ISO date string into a local-timezone Date.
- * new Date("2026-03-22T10:00:00") is parsed as UTC in most environments,
- * which shifts the displayed date in +3/+5 timezones. This parses locally.
- */
-function parseLocal(iso: string): Date {
-  if (!iso || typeof iso !== 'string') return new Date(0);
-  const clean = iso.replace('Z', '');
-  const [datePart, timePart = '00:00:00'] = clean.split('T');
-  if (!datePart || !datePart.includes('-')) return new Date(0);
-  const [year, month, day]                 = datePart.split('-').map(Number);
-  const [hour = 0, minute = 0, second = 0] = timePart.split(':').map(Number);
-  const d = new Date(year, month - 1, day, hour, minute, second);
-  return isNaN(d.getTime()) ? new Date(0) : d;
-}
-
-/**
- * ✅ Fixed: compares local dates so Today/Yesterday are correct in Nairobi (+3)
- * and any other non-UTC timezone.
- */
-function dateLabel(iso: string): string {
-  if (!iso) return 'Unknown date';
-  const d   = parseLocal(iso);
-  if (d.getTime() === 0) return 'Unknown date';
-  const now = new Date();
-
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth()    === b.getMonth()    &&
-    a.getDate()     === b.getDate();
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (sameDay(d, now))       return 'Today';
-  if (sameDay(d, yesterday)) return 'Yesterday';
-  return format(d, 'EEE, d MMM yyyy');
-}
-
-/** ✅ Single source of truth for sort — always newest first */
-function sortNewestFirst<T extends { movement_date: string }>(arr: T[]): T[] {
-  return [...arr].sort(
-    (a, b) => new Date(b.movement_date).getTime() - new Date(a.movement_date).getTime(),
-  );
-}
-
-/** Group a pre-sorted list by date label, preserving order within groups */
-function groupByDate(items: DirectSale[]): Record<string, DirectSale[]> {
-  const g: Record<string, DirectSale[]> = {};
-  for (const item of items) {
-    const k = dateLabel(item.movement_date);
-    if (!g[k]) g[k] = [];
-    g[k].push(item);
-  }
-  return g;
-}
-
-function parseCustomer(notes: string): { name: string; phone: string; isAccount: boolean } {
-  if (!notes) return { name: 'Walk-in', phone: '', isAccount: false };
-  const custMatch = notes.match(/^Customer:\s*([^(·\n]+?)(?:\s*\(([^)]+)\))?(?:\s*·|$)/i);
-  if (custMatch) return {
-    name:      custMatch[1].trim(),
-    phone:     custMatch[2]?.trim() ?? '',
-    isAccount: true,
-  };
-  const walkMatch = notes.match(/^Walk-in:\s*([^·\n]+)/i);
-  if (walkMatch) return { name: walkMatch[1].trim(), phone: '', isAccount: false };
-  return { name: 'Walk-in', phone: '', isAccount: false };
-}
-
-/** Extract DIRECT_SALE rows from the store product history */
-function extractAdminSales(
-  products: Array<{ product_name: string; history: StoreHistoryItem[] }>,
-  productType: 'bottle' | 'consumable',
-): DirectSale[] {
-  const out: DirectSale[] = [];
-  for (const product of products) {
-    for (const h of product.history) {
-      if (h.movement_type !== 'DIRECT_SALE') continue;
-      if (!h.movement_date) continue;
-      out.push({
-        id:               `admin-${h.id}`,
-        movement_date:    h.movement_date,
-        product_name:     product.product_name,
-        product_type:     productType,
-        quantity:         h.qty_total ?? h.quantity ?? 0,
-        driver_name:      h.driver_name      ?? undefined,
-        driver_id:        undefined,
-        recorded_by_name: h.recorded_by_name ?? null,
-        customer_name:    h.customer_name    ?? undefined,
-        notes:            h.notes            ?? '',
-        source:           'admin',  // ← was 'store'
-      });
-    }
-  }
-  return out;
-}
-
-/**
- * ✅ Fixed: uses local midnight boundaries instead of new Date(dateString)
- * which would be UTC midnight and miss same-day records in +3 timezones.
- */
-function passesDateFilter(iso: string, dateFrom: string, dateTo: string): boolean {
-  if (!dateFrom && !dateTo) return true;
-  const d = parseLocal(iso);
-  if (dateFrom) {
-    const [y, m, day] = dateFrom.split('-').map(Number);
-    if (d < new Date(y, m - 1, day, 0, 0, 0)) return false;
-  }
-  if (dateTo) {
-    const [y, m, day] = dateTo.split('-').map(Number);
-    if (d > new Date(y, m - 1, day, 23, 59, 59)) return false;
-  }
-  return true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Source badge  — Driver (violet) | Admin (teal)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SourceBadge: React.FC<{ source: DirectSale['source'] }> = ({ source }) =>
-  source === 'driver' ? (
-    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700 rounded-full px-1.5 py-0.5 shrink-0">
-      <Truck   className="h-2.5 w-2.5" />Driver
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-700 rounded-full px-1.5 py-0.5 shrink-0">
-      <UserCog className="h-2.5 w-2.5" />Admin
-    </span>
-  );
-
-/**
- * Determine the display name of who made the sale.
- * - Driver sales  → driver_name
- * - Admin sales   → recorded_by_name (the logged-in client admin who created it)
- */
-function soldBy(sale: DirectSale): string {
-  if (sale.source === 'driver') {
-    return sale.driver_name ?? 'Driver';
-  }
-  // Admin sale — show the person who recorded it
-  return sale.recorded_by_name ?? 'Admin';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Desktop table row
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven }) => {
-  const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
-  const seller = soldBy(sale);
-
-  return (
-    <tr className={cn(
-      'border-b last:border-0 transition-colors hover:bg-muted/30',
-      isEven ? 'bg-background' : 'bg-muted/10',
-    )}>
-      <td className="px-4 py-3.5">
-        <p className="text-sm font-semibold">
-          {sale.movement_date ? format(parseLocal(sale.movement_date), 'dd MMM yyyy') : '—'}
-        </p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {sale.movement_date ? format(parseLocal(sale.movement_date), 'HH:mm') : '—'}
-        </p>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <div className={cn(
-            'h-7 w-7 rounded-full flex items-center justify-center shrink-0 font-bold text-xs',
-            sale.source === 'driver'
-              ? 'bg-violet-500/10 text-violet-600'
-              : 'bg-teal-500/10 text-teal-600',
-          )}>
-            {seller.trim()[0]?.toUpperCase() ?? '?'}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{seller}</p>
-            <SourceBadge source={sale.source} />
-          </div>
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <div className={cn(
-            'h-7 w-7 rounded-lg flex items-center justify-center shrink-0',
-            sale.product_type === 'bottle'
-              ? 'bg-blue-500/10 text-blue-600'
-              : 'bg-sky-500/10 text-sky-600',
-          )}>
-            {sale.product_type === 'bottle'
-              ? <Droplets className="h-3.5 w-3.5" />
-              : <Package  className="h-3.5 w-3.5" />
-            }
-          </div>
-          <span className="text-sm">{sale.product_name}</span>
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <span className="font-bold text-amber-600 tabular-nums text-base">×{sale.quantity}</span>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <div className={cn(
-            'h-6 w-6 rounded-full flex items-center justify-center shrink-0',
-            isAccount ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground',
-          )}>
-            <User className="h-3 w-3" />
-          </div>
-          <div className="min-w-0">
-            <p className={cn(
-              'text-sm font-medium truncate',
-              isAccount ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground',
-            )}>
-              {sale.customer_name || custName}
-            </p>
-            {phone && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                <Phone className="h-2.5 w-2.5" />{phone}
-              </p>
-            )}
-          </div>
-          {isAccount && (
-            <span className="text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-full px-1.5 py-0.5 shrink-0">
-              Account
-            </span>
-          )}
-        </div>
-      </td>
-    </tr>
-  );
+const unitIcon = (unit?: string, className = 'h-4 w-4') => {
+  if (unit === 'LITRES')  return <Droplets className={cn(className, 'text-sky-500')}    />;
+  if (unit === 'DOZENS')  return <Grid3X3  className={cn(className, 'text-amber-500')}  />;
+  return                         <Package  className={cn(className, 'text-violet-500')} />;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mobile card
-// ─────────────────────────────────────────────────────────────────────────────
+const unitColor = (unit?: string) =>
+  unit === 'LITRES'  ? 'bg-sky-500/10    text-sky-500'    :
+  unit === 'DOZENS'  ? 'bg-amber-500/10  text-amber-500'  :
+                       'bg-violet-500/10 text-violet-500';
 
-const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
-  const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
-  const seller = soldBy(sale);
+const statusBadge = (product: Product) => {
+  if (product.status === 'ARCHIVED') return <Badge variant="secondary">Archived</Badge>;
+  if (!product.is_available)         return <Badge variant="warning">Hidden</Badge>;
+  if (product.status === 'INACTIVE') return <Badge variant="secondary">Inactive</Badge>;
+  return                                    <Badge variant="success">Active</Badge>;
+};
 
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-      {/* Top accent strip — violet for driver, teal for admin */}
-      <div className={cn(
-        'h-[3px] w-full',
-        sale.source === 'driver' ? 'bg-violet-400' : 'bg-teal-400',
-      )} />
+// ── Action dropdown ───────────────────────────────────────────────────────────
 
-      <div className="p-4 space-y-3">
+interface ProductActionsProps {
+  product:   Product;
+  onEdit:    (p: Product) => void;
+  onToggle:  (p: Product) => void;
+  onArchive: (p: Product) => void;
+}
 
-        {/* Product + qty */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className={cn(
-              'h-10 w-10 rounded-xl flex items-center justify-center shrink-0',
-              sale.product_type === 'bottle'
-                ? 'bg-blue-500/10 text-blue-600'
-                : 'bg-sky-500/10 text-sky-600',
-            )}>
-              {sale.product_type === 'bottle'
-                ? <Droplets className="h-5 w-5" />
-                : <Package  className="h-5 w-5" />
-              }
+const ProductActions: React.FC<ProductActionsProps> = ({
+  product, onEdit, onToggle, onArchive,
+}) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuItem onClick={() => onEdit(product)}>
+        <Pencil className="mr-2 h-4 w-4" /> Edit Product
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => onToggle(product)}>
+        {product.is_available
+          ? <><EyeOff className="mr-2 h-4 w-4" /> Hide from customers</>
+          : <><Eye    className="mr-2 h-4 w-4" /> Show to customers</>}
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="text-destructive focus:text-destructive"
+        onClick={() => onArchive(product)}
+      >
+        <Trash2 className="mr-2 h-4 w-4" /> Archive
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
+// ── Grid card ─────────────────────────────────────────────────────────────────
+
+interface CardRowProps extends ProductActionsProps {
+  isAdmin: boolean;
+}
+
+const GridCard: React.FC<CardRowProps> = ({ product, isAdmin, ...actions }) => (
+  <Card className={cn(
+    'border-border/50 transition-opacity group',
+    (!product.is_available || product.status !== 'ACTIVE') && 'opacity-60',
+  )}>
+    <CardContent className="p-5">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2.5">
+          {product.image_url ? (
+            <img
+              src={product.image_url}
+              alt={product.name}
+              className="h-10 w-10 rounded-lg object-cover border border-border/50 shrink-0"
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+          ) : (
+            <div className={cn('p-2 rounded-lg shrink-0', unitColor(product.unit))}>
+              {unitIcon(product.unit)}
             </div>
-            <div className="min-w-0">
-              <p className="font-bold text-sm truncate">{sale.product_name}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {sale.movement_date ? format(parseLocal(sale.movement_date), 'dd MMM · HH:mm') : '—'}
-              </p>
-            </div>
-          </div>
-          <span className="text-2xl font-black tabular-nums text-amber-600 shrink-0">
-            ×{sale.quantity}
-          </span>
-        </div>
-
-        {/* Sold-by row */}
-        <div className={cn(
-          'flex items-center gap-2 px-3 py-2 rounded-xl border',
-          sale.source === 'driver'
-            ? 'bg-violet-50 dark:bg-violet-950/30 border-violet-100 dark:border-violet-900'
-            : 'bg-teal-50 dark:bg-teal-950/30 border-teal-100 dark:border-teal-900',
-        )}>
-          <div className={cn(
-            'h-6 w-6 rounded-full flex items-center justify-center shrink-0 font-bold text-[10px]',
-            sale.source === 'driver'
-              ? 'bg-violet-500/20 text-violet-600'
-              : 'bg-teal-500/20 text-teal-600',
-          )}>
-            {seller.trim()[0]?.toUpperCase() ?? '?'}
-          </div>
-          <p className={cn(
-            'text-xs font-semibold truncate flex-1',
-            sale.source === 'driver'
-              ? 'text-violet-800 dark:text-violet-300'
-              : 'text-teal-800 dark:text-teal-300',
-          )}>
-            {seller}
-          </p>
-          <SourceBadge source={sale.source} />
-        </div>
-
-        {/* Customer row */}
-        <div className={cn(
-          'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border',
-          isAccount
-            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800'
-            : 'bg-muted/40 border-border/40',
-        )}>
-          <User className={cn(
-            'h-3.5 w-3.5 shrink-0',
-            isAccount ? 'text-emerald-600' : 'text-muted-foreground',
-          )} />
-          <div className="flex-1 min-w-0">
-            <p className={cn(
-              'text-xs font-semibold truncate',
-              isAccount ? 'text-emerald-800 dark:text-emerald-300' : 'text-muted-foreground',
-            )}>
-              {sale.customer_name || custName}
-            </p>
-            {phone && (
-              <p className="text-[10px] text-emerald-700/70 flex items-center gap-1 mt-0.5">
-                <Phone className="h-2.5 w-2.5" />{phone}
-              </p>
-            )}
-          </div>
-          {isAccount && (
-            <span className="text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-full px-1.5 py-0.5 shrink-0">
-              Account
-            </span>
           )}
+          <div>
+            <p className="font-semibold text-foreground leading-tight">{product.name}</p>
+            <p className="text-xs text-muted-foreground capitalize">
+              {product.unit?.toLowerCase() ?? 'unit'}
+              {product.is_returnable && (
+                <span className="ml-1.5 inline-flex items-center gap-0.5 text-blue-600">
+                  <RotateCcw className="h-2.5 w-2.5" /> returnable
+                </span>
+              )}
+            </p>
+          </div>
         </div>
-
+        <div className="flex items-center gap-1.5">
+          {statusBadge(product)}
+          <ProductActions product={product} {...actions} />
+        </div>
       </div>
+
+      {/* Pricing */}
+      <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+        <div className="flex items-end justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">Selling price</p>
+            <p className="text-xl font-bold text-foreground">
+              KES {parseFloat(product.selling_price).toLocaleString()}
+            </p>
+            {isAdmin && product.buying_price && parseFloat(product.buying_price) > 0 && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Cost: KES {parseFloat(product.buying_price).toLocaleString()}
+                <span className={cn(
+                  'ml-1.5 font-medium',
+                  parseFloat(product.selling_price) - parseFloat(product.buying_price) > 0
+                    ? 'text-emerald-600' : 'text-destructive',
+                )}>
+                  ({Math.round(
+                    ((parseFloat(product.selling_price) - parseFloat(product.buying_price))
+                      / parseFloat(product.selling_price)) * 100,
+                  )}% margin)
+                </span>
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Visible</span>
+            <Switch
+              checked={product.is_available}
+              onCheckedChange={() => actions.onToggle(product)}
+              disabled={product.status !== 'ACTIVE'}
+            />
+          </div>
+        </div>
+
+        {product.delivery_fee !== undefined && parseFloat(product.delivery_fee ?? '0') > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Delivery fee: KES {parseFloat(product.delivery_fee!).toLocaleString()}
+          </p>
+        )}
+      </div>
+    </CardContent>
+  </Card>
+);
+
+// ── List row ──────────────────────────────────────────────────────────────────
+
+const ListRow: React.FC<CardRowProps> = ({ product, isAdmin, ...actions }) => (
+  <div className={cn(
+    'flex items-center gap-4 px-4 py-3 rounded-lg border border-border/50 bg-card',
+    'hover:bg-muted/30 transition-colors',
+    (!product.is_available || product.status !== 'ACTIVE') && 'opacity-60',
+  )}>
+    {product.image_url ? (
+      <img
+        src={product.image_url}
+        alt={product.name}
+        className="h-9 w-9 rounded-lg object-cover border border-border/50 shrink-0"
+        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+    ) : (
+      <div className={cn('p-2 rounded-lg shrink-0', unitColor(product.unit))}>
+        {unitIcon(product.unit, 'h-4 w-4')}
+      </div>
+    )}
+
+    <div className="flex-1 min-w-0">
+      <p className="font-medium text-sm leading-tight truncate">{product.name}</p>
+      <p className="text-xs text-muted-foreground capitalize flex items-center gap-1">
+        {product.unit?.toLowerCase()}
+        {product.is_returnable && (
+          <span className="inline-flex items-center gap-0.5 text-blue-600">
+            · <RotateCcw className="h-2.5 w-2.5" /> returnable
+          </span>
+        )}
+      </p>
     </div>
-  );
-};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PAGE
-// ─────────────────────────────────────────────────────────────────────────────
+    <div className="hidden sm:block shrink-0">{statusBadge(product)}</div>
 
-type SourceFilter = 'all' | 'driver' | 'admin';  // ← 'store' → 'admin'
+    <div className="hidden md:block text-right shrink-0 w-28">
+      <p className="font-semibold text-sm">KES {parseFloat(product.selling_price).toLocaleString()}</p>
+      {isAdmin && product.buying_price && parseFloat(product.buying_price) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Cost {parseFloat(product.buying_price).toLocaleString()}
+        </p>
+      )}
+    </div>
 
-const DirectSalesPage: React.FC = () => {
-  const [sales,        setSales]        = useState<DirectSale[]>([]);
-  const [drivers,      setDrivers]      = useState<DriverOption[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [search,       setSearch]       = useState('');
-  const [driverFilter, setDriverFilter] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [dateFrom,     setDateFrom]     = useState('');
-  const [dateTo,       setDateTo]       = useState('');
+    <Switch
+      checked={product.is_available}
+      onCheckedChange={() => actions.onToggle(product)}
+      disabled={product.status !== 'ACTIVE'}
+      className="shrink-0"
+    />
 
-  // ── Load drivers ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    axiosInstance.get('/auth/employees/', { params: { role: 'driver', limit: 100 } })
-      .then(res => {
-        const raw = res.data?.data ?? res.data?.results ?? res.data ?? [];
-        setDrivers(raw.map((d: Record<string, unknown>) => ({
-          id:   String(d.id),
-          name: `${d.first_name ?? ''} ${d.last_name ?? ''}`.trim() || String(d.email),
-        })));
-      })
-      .catch(() => {});
-  }, []);
+    <div className="flex items-center gap-1 shrink-0">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7"
+              onClick={() => actions.onEdit(product)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Edit</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <ProductActions product={product} {...actions} />
+    </div>
+  </div>
+);
 
-  // ── Load all sales ────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoading(true);
+// ── Compact row ───────────────────────────────────────────────────────────────
+
+const CompactRow: React.FC<CardRowProps> = ({ product, ...actions }) => (
+  <div className={cn(
+    'flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors',
+    (!product.is_available || product.status !== 'ACTIVE') && 'opacity-60',
+  )}>
+    <div className={cn('p-1.5 rounded-md shrink-0', unitColor(product.unit))}>
+      {unitIcon(product.unit, 'h-3.5 w-3.5')}
+    </div>
+    <p className="flex-1 text-sm font-medium truncate">{product.name}</p>
+    <span className="text-xs text-muted-foreground hidden sm:block shrink-0">
+      KES {parseFloat(product.selling_price).toLocaleString()}
+    </span>
+    <Switch
+      checked={product.is_available}
+      onCheckedChange={() => actions.onToggle(product)}
+      disabled={product.status !== 'ACTIVE'}
+      className="shrink-0 scale-90"
+    />
+    <ProductActions product={product} {...actions} />
+  </div>
+);
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+const ProductsPage: React.FC = () => {
+  const { toast } = useToast();
+  const { user }  = useAuth();
+  const isAdmin   = user?.role === 'client_admin';
+
+  const [products,      setProducts]      = useState<Product[]>([]);
+  const [isLoading,     setIsLoading]     = useState(true);
+  const [search,        setSearch]        = useState('');
+  const [statusFilter,  setStatusFilter]  = useState('');
+  const [viewMode,      setViewMode]      = useState<ViewMode>('grid');
+
+  const [createOpen,    setCreateOpen]    = useState(false);
+  const [editTarget,    setEditTarget]    = useState<Product | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+
+  const fetchProducts = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const [driverSales, bottleProducts, consumableProducts] = await Promise.all([
-        driverStoreService.getDirectSalesAdmin({
-          driver_id: driverFilter || undefined,
-          date_from: dateFrom     || undefined,
-          date_to:   dateTo       || undefined,
-        }),
-        bottleStoreService.getAll(),
-        consumableStoreService.getAll(),
-      ]);
-
-      // Normalise driver sales — already server-side filtered
-      const normDriver: DirectSale[] = (driverSales as Array<{
-        id: string; movement_date: string; product_name: string;
-        product_type: 'bottle' | 'consumable'; quantity: number;
-        driver_name: string; driver_id: string; notes: string;
-      }>).map(s => ({ ...s, source: 'driver' as const }));
-
-      // Extract admin DIRECT_SALE rows from product history
-      const rawAdmin: DirectSale[] = [
-        ...extractAdminSales(
-          bottleProducts.map(p => ({
-            product_name: p.product_name,
-            history:      p.history as StoreHistoryItem[],
-          })),
-          'bottle',
-        ),
-        ...extractAdminSales(
-          consumableProducts.map(p => ({
-            product_name: p.product_name,
-            history:      p.history as StoreHistoryItem[],
-          })),
-          'consumable',
-        ),
-      ];
-
-      // Admin sales filtered client-side.
-      // When a driver filter is active, exclude admin sales (they have no driver).
-      const adminSales = driverFilter
-        ? []
-        : rawAdmin.filter(s => passesDateFilter(s.movement_date, dateFrom, dateTo));
-
-      // ✅ Merge then sort once — single source of truth for order
-      setSales(sortNewestFirst([...normDriver, ...adminSales]));
-
+      const data = await productsService.getProducts({
+        status: statusFilter || undefined,
+        search: search       || undefined,
+      });
+      setProducts(data);
     } catch {
-      toast.error('Failed to load direct sales');
+      toast({ title: 'Error', description: 'Failed to load products.', variant: 'destructive' });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }, [driverFilter, dateFrom, dateTo]);
+  }, [search, statusFilter, toast]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const t = setTimeout(fetchProducts, 300);
+    return () => clearTimeout(t);
+  }, [fetchProducts]);
 
-  // ── Filter + re-sort ──────────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    let list = sales; // already sorted
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
-    if (sourceFilter !== 'all') {
-      list = list.filter(s => s.source === sourceFilter);
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(s =>
-        s.product_name.toLowerCase().includes(q)              ||
-        (s.driver_name       ?? '').toLowerCase().includes(q) ||
-        (s.recorded_by_name  ?? '').toLowerCase().includes(q) ||
-        (s.customer_name     ?? '').toLowerCase().includes(q) ||
-        s.notes.toLowerCase().includes(q),
-      );
-    }
-
-    // ✅ Re-sort after filtering — Array.filter doesn't guarantee stable order
-    return sortNewestFirst(list);
-  }, [sales, search, sourceFilter]);
-
-  // ── Stats ─────────────────────────────────────────────────────────────────
-  const totalUnits      = filtered.reduce((s, r) => s + r.quantity, 0);
-  const todayCount      = filtered.filter(s => dateLabel(s.movement_date) === 'Today').length;
-  const accountCount    = filtered.filter(s => /^Customer:/i.test(s.notes)).length;
-  const driverSaleCount = filtered.filter(s => s.source === 'driver').length;
-  const adminSaleCount  = filtered.filter(s => s.source === 'admin').length;
-
-  // ✅ groupByDate runs on the sorted filtered list
-  const grouped = useMemo(() => groupByDate(filtered), [filtered]);
-
-  const hasFilters = !!(search || driverFilter || dateFrom || dateTo || sourceFilter !== 'all');
-
-  const clearFilters = () => {
-    setSearch(''); setDriverFilter(''); setDateFrom(''); setDateTo('');
-    setSourceFilter('all');
+  const handleProductSaved = (saved: Product) => {
+    setProducts(prev => {
+      const idx = prev.findIndex(p => p.id === saved.id);
+      if (idx >= 0) { const next = [...prev]; next[idx] = saved; return next; }
+      return [saved, ...prev];
+    });
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
+  const handleToggle = async (product: Product) => {
+    try {
+      const { product: updated } = await productsService.toggleProduct(product.id);
+      setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
+      toast({
+        title:       updated.is_available ? 'Product visible' : 'Product hidden',
+        description: `"${updated.name}" is now ${updated.is_available ? 'visible to' : 'hidden from'} customers.`,
+      });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to toggle product.', variant: 'destructive' });
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    setActionLoading(true);
+    try {
+      await productsService.archiveProduct(archiveTarget.id);
+      setProducts(prev => prev.filter(p => p.id !== archiveTarget.id));
+      toast({ title: `"${archiveTarget.name}" archived.` });
+      setArchiveTarget(null);
+    } catch {
+      toast({ title: 'Error', description: 'Failed to archive product.', variant: 'destructive' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openCreate  = ()           => { setEditTarget(null); setCreateOpen(true);  };
+  const openEdit    = (p: Product) => { setEditTarget(p);    setCreateOpen(true);  };
+  const closeCreate = ()           => { setCreateOpen(false); setEditTarget(null); };
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+
+  const activeCount     = products.filter(p => p.status === 'ACTIVE' && p.is_available).length;
+  const hiddenCount     = products.filter(p => !p.is_available && p.status !== 'ARCHIVED').length;
+  const returnableCount = products.filter(p => p.is_returnable).length;
+  const inactiveCount   = products.filter(p => p.status === 'INACTIVE').length;
+
+  const actionProps = {
+    onEdit:    openEdit,
+    onToggle:  handleToggle,
+    onArchive: setArchiveTarget,
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <DashboardLayout
-      title="Direct Sales"
-      subtitle="Driver roadside sales + admin walk-in sales"
+      title="Product Catalogue"
+      subtitle="Define your products — manage stock operations in Store"
     >
-      {/* ── Stats strip ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
+
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Total Sales',   val: filtered.length, cls: 'bg-amber-50   text-amber-700   border-amber-200/60'   },
-          { label: 'Today',         val: todayCount,       cls: 'bg-blue-50    text-blue-700    border-blue-200/60'    },
-          { label: 'Units Sold',    val: totalUnits,       cls: 'bg-muted/60   text-foreground  border-border/60'      },
-          { label: 'Account Sales', val: accountCount,     cls: 'bg-emerald-50 text-emerald-700 border-emerald-200/60' },
-        ].map(({ label, val, cls }) => (
-          <div key={label} className={cn('rounded-2xl border px-4 py-3 flex items-center justify-between gap-3', cls)}>
-            <div>
-              <p className="text-2xl font-black tabular-nums leading-none">{val}</p>
-              <p className="text-[11px] font-semibold opacity-60 mt-1 uppercase tracking-wide">{label}</p>
-            </div>
-            <ShoppingBag className="h-5 w-5 opacity-20 shrink-0" />
-          </div>
+          { label: 'Total Products', value: products.length,   icon: <Package       className="h-4 w-4 text-primary" />,          bg: 'bg-primary/10'  },
+          { label: 'Active',         value: activeCount,        icon: <Eye           className="h-4 w-4 text-success" />,          bg: 'bg-success/10'  },
+          { label: 'Hidden',         value: hiddenCount,        icon: <EyeOff        className="h-4 w-4 text-warning" />,          bg: 'bg-warning/10'  },
+          { label: 'Returnable',     value: returnableCount,    icon: <RotateCcw     className="h-4 w-4 text-blue-500" />,         bg: 'bg-blue-500/10' },
+        ].map(s => (
+          <Card key={s.label} className="border-border/50">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${s.bg}`}>{s.icon}</div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{s.label}</p>
+                  <p className="text-2xl font-bold">{s.value}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* ── Driver vs Admin breakdown ── */}
-      {(driverSaleCount > 0 || adminSaleCount > 0) && (
-        <div className="rounded-2xl border border-border/60 bg-card p-4 mb-5 flex items-center gap-4">
-          <div className="h-10 w-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
-            <TrendingUp className="h-5 w-5" />
-          </div>
-          <div className="flex-1 min-w-0 flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-violet-500" />
-              <span className="text-sm text-muted-foreground">
-                <strong className="text-foreground">{driverSaleCount}</strong> driver sale{driverSaleCount !== 1 ? 's' : ''}
-              </span>
+      {/* ── Filters + View toggle + New Product ── */}
+      <Card className="mb-6 border-border/50">
+        <CardContent className="p-4">
+          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+
+            <div className="flex flex-1 gap-3 w-full flex-wrap">
+              <div className="relative flex-1 min-w-48">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search products…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select
+                value={statusFilter || 'all'}
+                onValueChange={v => setStatusFilter(v === 'all' ? '' : v)}
+              >
+                <SelectTrigger className="w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="ACTIVE">Active</SelectItem>
+                  <SelectItem value="INACTIVE">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-teal-500" />
-              <span className="text-sm text-muted-foreground">
-                <strong className="text-foreground">{adminSaleCount}</strong> admin sale{adminSaleCount !== 1 ? 's' : ''}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Users className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">
-                <strong className="text-foreground">{totalUnits}</strong> units total
-              </span>
+
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              {/* View-mode toggle */}
+              <div className="flex items-center rounded-lg border border-border/60 p-0.5 bg-muted/30 mr-1">
+                {([
+                  { mode: 'grid'    as ViewMode, icon: <LayoutGrid   className="h-3.5 w-3.5" />, label: 'Grid'    },
+                  { mode: 'list'    as ViewMode, icon: <List          className="h-3.5 w-3.5" />, label: 'List'    },
+                  { mode: 'compact' as ViewMode, icon: <AlignJustify  className="h-3.5 w-3.5" />, label: 'Compact' },
+                ] as const).map(v => (
+                  <TooltipProvider key={v.mode}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setViewMode(v.mode)}
+                          className={cn(
+                            'flex items-center justify-center h-7 w-7 rounded-md transition-colors',
+                            viewMode === v.mode
+                              ? 'bg-background shadow-sm text-foreground'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          {v.icon}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{v.label}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ))}
+              </div>
+
+              <Button variant="ocean" className="gap-2 flex-1 md:flex-none" onClick={openCreate}>
+                <Plus className="h-4 w-4" /> New Product
+              </Button>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Product list / grid ── */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      )}
-
-      {/* ── Filters ── */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-5">
-        {/* Search */}
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search product, driver, admin, customer…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="pl-9 h-10 rounded-xl bg-muted/40 border-transparent text-sm"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Source toggle: All / Driver / Admin */}
-        <div className="flex items-center rounded-xl border border-border/60 bg-muted/30 p-1 gap-0.5 shrink-0">
-          {([
-            { val: 'all'    as SourceFilter, label: 'All'    },
-            { val: 'driver' as SourceFilter, label: 'Driver' },
-            { val: 'admin'  as SourceFilter, label: 'Admin'  },
-          ]).map(opt => (
-            <button
-              key={opt.val}
-              onClick={() => setSourceFilter(opt.val)}
-              className={cn(
-                'h-8 px-3 rounded-lg text-xs font-semibold transition-colors',
-                sourceFilter === opt.val
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Driver picker (only meaningful for Driver filter) */}
-        <Select
-          value={driverFilter || 'all'}
-          onValueChange={val => setDriverFilter(val === 'all' ? '' : val)}
-        >
-          <SelectTrigger className="h-10 w-full sm:w-44 rounded-xl bg-muted/40 border-transparent text-sm">
-            <SelectValue placeholder="All drivers" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Drivers</SelectItem>
-            {drivers.map(d => (
-              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Date from */}
-        <div className="relative">
-          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            type="date" value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
-            className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm"
-          />
-        </div>
-
-        {/* Date to */}
-        <div className="relative">
-          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            type="date" value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
-            className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm"
-          />
-        </div>
-
-        <Button
-          variant="outline" size="sm"
-          className="h-10 rounded-xl gap-2 shrink-0"
-          onClick={load} disabled={loading}
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
-
-        {hasFilters && (
-          <Button
-            variant="ghost" size="sm"
-            className="h-10 rounded-xl gap-1.5 shrink-0 text-muted-foreground"
-            onClick={clearFilters}
-          >
-            <X className="h-3.5 w-3.5" />Clear
-          </Button>
-        )}
-      </div>
-
-      {/* ── Summary ── */}
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-muted-foreground">
-          <strong>{filtered.length}</strong> sale{filtered.length !== 1 ? 's' : ''}
-          {hasFilters && ' · filtered'}
-          {filtered.length > 0 && ` · ${totalUnits} unit${totalUnits !== 1 ? 's' : ''} total`}
-        </p>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px] gap-1 py-0 h-5">
-            <div className="h-1.5 w-1.5 rounded-full bg-violet-500" />Driver
-          </Badge>
-          <Badge variant="outline" className="text-[10px] gap-1 py-0 h-5">
-            <div className="h-1.5 w-1.5 rounded-full bg-teal-500" />Admin
-          </Badge>
-        </div>
-      </div>
-
-      {/* ── Content ── */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
-          <Loader2 className="h-7 w-7 animate-spin text-primary/50" />
-          <p className="text-sm">Loading sales…</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-          <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-            <InboxIcon className="h-7 w-7 text-muted-foreground/30" />
-          </div>
-          <p className="font-bold text-base mb-1">No direct sales found</p>
-          <p className="text-sm text-muted-foreground">
-            {hasFilters
-              ? 'Try adjusting your filters.'
-              : 'Sales will appear here once drivers or admins start recording them.'}
-          </p>
-        </div>
+      ) : products.length === 0 ? (
+        <Card className="border-dashed border-2">
+          <CardContent className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="p-4 rounded-full bg-muted/50">
+              <Package className="h-10 w-10 text-muted-foreground" />
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-lg">No products yet</p>
+              <p className="text-sm text-muted-foreground">
+                Create your first product so customers can start placing orders.
+              </p>
+            </div>
+            <Button variant="ocean" onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" /> Create First Product
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className="hidden md:block rounded-2xl border overflow-hidden mb-4">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  {['Date / Time', 'Sold By', 'Product', 'Qty', 'Customer'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((sale, i) => (
-                  <SaleRow key={sale.id} sale={sale} isEven={i % 2 === 0} />
-                ))}
-              </tbody>
-            </table>
-            <div className="px-4 py-2.5 border-t bg-muted/20 flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {filtered.length} sale{filtered.length !== 1 ? 's' : ''}
-                {' · '}
-                <span className="text-violet-600">{driverSaleCount} driver</span>
-                {' · '}
-                <span className="text-teal-600">{adminSaleCount} admin</span>
-              </p>
-              <p className="text-xs font-semibold text-amber-600">
-                {totalUnits} unit{totalUnits !== 1 ? 's' : ''} total
-              </p>
+          {viewMode === 'grid' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {products.map(p => (
+                <GridCard key={p.id} product={p} isAdmin={isAdmin} {...actionProps} />
+              ))}
             </div>
-          </div>
+          )}
 
-          {/* Mobile cards grouped by date */}
-          <div className="md:hidden space-y-6 pb-8">
-            {Object.entries(grouped).map(([date, items]) => (
-              <div key={date}>
-                <div className="flex items-center gap-3 mb-3">
-                  <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">
-                    {date}
-                  </p>
-                  <div className="flex-1 h-px bg-border/40" />
-                  <span className="text-[10px] font-bold text-muted-foreground">
-                    {items.length} sale{items.length !== 1 ? 's' : ''}
-                    {' · '}
-                    {items.reduce((s, i) => s + i.quantity, 0)} units
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {items.map(sale => (
-                    <SaleCard key={sale.id} sale={sale} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          {viewMode === 'list' && (
+            <div className="space-y-2">
+              {products.map(p => (
+                <ListRow key={p.id} product={p} isAdmin={isAdmin} {...actionProps} />
+              ))}
+            </div>
+          )}
+
+          {viewMode === 'compact' && (
+            <Card className="border-border/50">
+              <CardContent className="p-2 divide-y divide-border/40">
+                {products.map(p => (
+                  <CompactRow key={p.id} product={p} isAdmin={isAdmin} {...actionProps} />
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
+
+      {/* ── Dialogs ── */}
+      <CreateProductDialog
+        open={createOpen}
+        product={editTarget}
+        onClose={closeCreate}
+        onSaved={handleProductSaved}
+      />
+      <ConfirmDialog
+        open={archiveTarget !== null}
+        title="Archive Product"
+        description={`Archive "${archiveTarget?.name}"? It will be hidden from customers and removed from your catalogue.`}
+        confirmLabel="Archive"
+        confirmVariant="destructive"
+        isLoading={actionLoading}
+        onConfirm={handleArchive}
+        onCancel={() => setArchiveTarget(null)}
+      />
     </DashboardLayout>
   );
 };
 
-export default DirectSalesPage;
+export default ProductsPage;

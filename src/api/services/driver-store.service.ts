@@ -31,7 +31,7 @@ export interface DriverBottleStock {
   product_id:     string;
   product_name:   string;
   product_image?: string | null;
-  selling_price?: string;        // ✅ added — decimal string e.g. "150.00"
+  selling_price?: string;        // decimal string e.g. "150.00"
   balance:        DriverBottleBalance;
   last_loaded?:   string | null;
 }
@@ -41,7 +41,7 @@ export interface DriverConsumableStock {
   product_name:   string;
   product_image?: string | null;
   unit?:          string;
-  selling_price?: string;        // ✅ added — decimal string e.g. "50.00"
+  selling_price?: string;        // decimal string e.g. "50.00"
   balance:        DriverConsumableBalance;
   last_loaded?:   string | null;
 }
@@ -64,14 +64,21 @@ export interface DriverStockHistory {
   product_name:   string;
   quantity:       number;
   notes?:         string;
-  unit_price?:     string;
+  unit_price?:    string;
+  payment_method?: string;
 }
 
+export type PaymentMethod = 'CASH' | 'MPESA' | 'BANK_TRANSFER' | 'CREDIT';
+
 export interface RecordUseRequest {
-  product_id:   string;
-  product_type: 'bottle' | 'consumable';
-  quantity:     number;
-  notes?:       string;
+  product_id:     string;
+  product_type:   'bottle' | 'consumable';
+  quantity:       number;
+  qty_collected?: number;
+  notes?:         string;
+  customer_id?:   string;
+  movement_type?: 'DIRECT_SALE' | 'DELIVERY_USE';
+  payment_method?: PaymentMethod;  // ✅ forwarded to backend
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +93,7 @@ function normaliseBottle(raw: Raw): DriverBottleStock {
     product_id:    (raw.product_id    ?? raw.id   ?? '') as string,
     product_name:  (raw.product_name  ?? raw.name ?? '') as string,
     product_image: (raw.product_image ?? raw.image ?? null) as string | null,
-    selling_price: raw.selling_price != null ? String(raw.selling_price) : undefined,  // ✅
+    selling_price: raw.selling_price != null ? String(raw.selling_price) : undefined,
     last_loaded:   (raw.last_loaded   ?? null) as string | null,
     balance: {
       full:    Number(bal.full    ?? 0),
@@ -104,7 +111,7 @@ function normaliseConsumable(raw: Raw): DriverConsumableStock {
     product_name:  (raw.product_name  ?? raw.name ?? '') as string,
     product_image: (raw.product_image ?? raw.image ?? null) as string | null,
     unit:          (raw.unit ?? '') as string,
-    selling_price: raw.selling_price != null ? String(raw.selling_price) : undefined,  // ✅
+    selling_price: raw.selling_price != null ? String(raw.selling_price) : undefined,
     last_loaded:   (raw.last_loaded   ?? null) as string | null,
     balance: { in_stock: Number(bal.in_stock ?? bal.quantity ?? 0) },
   };
@@ -124,13 +131,14 @@ function normaliseRequirement(raw: Raw): DeliveryRequirement {
 
 function normaliseHistory(raw: Raw): DriverStockHistory {
   return {
-    id:            (raw.id             ?? '') as string,
-    movement_type: (raw.movement_type  ?? '') as string,
-    movement_date: (raw.movement_date  ?? raw.created_at ?? new Date().toISOString()) as string,
-    product_name:  (raw.product_name   ?? raw.name ?? '') as string,
-    quantity:      Number(raw.quantity  ?? raw.qty  ?? 0),
-    notes:         (raw.notes ?? undefined) as string | undefined,
-    unit_price:    raw.unit_price != null ? String(raw.unit_price) : undefined, 
+    id:             (raw.id             ?? '') as string,
+    movement_type:  (raw.movement_type  ?? '') as string,
+    movement_date:  (raw.movement_date  ?? raw.created_at ?? new Date().toISOString()) as string,
+    product_name:   (raw.product_name   ?? raw.name ?? '') as string,
+    quantity:       Number(raw.quantity  ?? raw.qty  ?? 0),
+    notes:          (raw.notes ?? undefined) as string | undefined,
+    unit_price:     raw.unit_price != null ? String(raw.unit_price) : undefined,
+    payment_method: raw.payment_method != null ? String(raw.payment_method) : undefined,  // ✅ add
   };
 }
 
@@ -197,18 +205,11 @@ export const driverStoreService = {
     }
   },
 
-  async recordUse(data: {
-    product_id:     string;
-    product_type:   'bottle' | 'consumable';
-    quantity:       number;
-    qty_collected?: number;
-    notes?:         string;
-    customer_id?:   string;
-    movement_type?: 'DIRECT_SALE' | 'DELIVERY_USE';
-  }): Promise<void> {
+  async recordUse(data: RecordUseRequest): Promise<void> {
     await axiosInstance.post('/driver/store/use/', {
       ...data,
-      movement_type: data.movement_type ?? 'DIRECT_SALE',
+      movement_type:  data.movement_type  ?? 'DIRECT_SALE',
+      payment_method: data.payment_method ?? 'CASH',   // ✅ forwarded to backend
     });
   },
 

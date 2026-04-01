@@ -478,3 +478,182 @@ class CustomerStatementView(APIView):
             'aging': aging,
             'invoices': InvoiceListSerializer(invoices, many=True).data,
         })
+# ── Payment tracking report ───────────────────────────────────────────────────
+
+
+class PaymentReportView(APIView):
+    """
+    GET /api/invoices/payment-report/
+
+    Full payment accountability report covering ALL customers:
+      - Credit vs non-credit breakdown
+      - Outstanding balances per customer
+      - Payment method breakdown (CASH, MPESA, etc.)
+      - Orders with no invoice OR with unpaid invoice
+
+    Query params:
+        customer_type  — 'credit' | 'non_credit' | 'all' (default: all)
+        status         — 'paid' | 'unpaid' | 'overdue' | 'all' (default: all)
+        date_from      — ISO date e.g. 2026-01-01
+        date_to        — ISO date
+    """
+
+    permission_classes = [IsAccountsStaff]
+
+    def get(self, request):
+        from django.db.models import Sum, Count, Q
+        from apps.orders.models import Order
+
+        today = timezone.now().date()
+        client = request.user.client
+
+        # ── Filters ───────────────────────────────────────────────────────────
+        customer_type = request.query_params.get('customer_type', 'all')
+        status_filter = request.query_params.get('status', 'all')
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        # Base customer queryset
+        customers = Customer.objects.filter(
+            client=client
+        ).select_related('payment_profile').order_by('full_name')
+
+        if customer_type == 'credit':
+            customers = customers.filter(
+                payment_profile__credit_account_enabled=True)
+        elif customer_type == 'non_credit':
+            customers = customers.filter(
+                Q(payment_profile__isnull=True) |
+                Q(payment_profile__credit_account_enabled=False)
+            )
+
+        # ── Per-customer summary ──────────────────────────────────────────────
+        customer_rows = []
+        totals = {
+            'total_invoiced':    Decimal('0.00'),
+            'total_paid':        Decimal('0.00'),
+            'total_outstanding': Decimal('0.00'),
+        }
+
+        for customer in customers:
+            invoice_qs = Invoice.objects.filter(
+                customer=customer, client=client
+            )
+            if date_from:
+                invoice_qs = invoice_qs.filter(created_at__date__gte=date_from)
+            if date_to:
+                invoice_qs = invoice_qs.filter(created_at__date__lte=date_to)
+
+            # Status filter
+            if status_filter == 'paid':
+                invoice_qs = invoice_qs.filter(status='PAID')
+            elif status_filter == 'unpaid':
+                invoice_qs = invoice_qs.filter(
+                    status__in=['ISSUED', 'OVERDUE'])
+            elif status_filter == 'overdue':
+                invoice_qs = invoice_qs.filter(status='OVERDUE')
+
+            invoices_list = list(invoice_qs)
+            total_invoiced = sum(i.total_amount for i in invoices_list)
+            total_paid = sum(i.amount_paid for i in invoices_list)
+            total_outstanding = sum(
+                i.total_amount - i.amount_paid
+                for i in invoices_list
+                if i.status not in ('PAID', 'CANCELLED')
+            )
+
+            # Payment method breakdown for this customer
+            method_breakdown = {}
+            for inv in invoices_list:
+                if inv.status == 'PAID' and inv.payment_method:
+                    method = inv.payment_method.upper()
+                    method_breakdown[method] = float(
+                        method_breakdown.get(method, 0)) + float(inv.amount_paid)
+
+            # Orders with no invoice at all
+            orders_no_invoice = Order.objects.filter(
+                customer=customer, client=client
+            ).exclude(
+                id__in=Invoice.objects.filter(
+                    customer=customer, client=client
+                ).values_list('order_id', flat=True)
+            ).values('order_number', 'total_amount', 'payment_status', 'created_at')
+
+            # Credit info
+            try:
+                profile = customer.payment_profile
+                credit_enabled = profile.credit_account_enabled
+                credit_limit = float(profile.credit_limit)
+                available_credit = float(profile.available_credit)
+            except Exception:
+                credit_enabled = False
+                credit_limit = 0.0
+                available_credit = 0.0
+
+            totals['total_invoiced'] += total_invoiced
+            totals['total_paid'] += total_paid
+            totals['total_outstanding'] += total_outstanding
+
+            customer_rows.append({
+                'customerId':        str(customer.id),
+                'fullName':          customer.full_name,
+                'phone':             customer.phone_number,
+                'isCredit':          credit_enabled,
+                'creditLimit':       credit_limit,
+                'availableCredit':   available_credit,
+                'totalInvoiced':     float(total_invoiced),
+                'totalPaid':         float(total_paid),
+                'totalOutstanding':  float(total_outstanding),
+                'invoiceCount':      len(invoices_list),
+                'unpaidCount':       sum(1 for i in invoices_list if i.status in ('ISSUED', 'OVERDUE')),
+                'overdueCount':      sum(1 for i in invoices_list if i.status == 'OVERDUE'),
+                'paymentBreakdown':  method_breakdown,
+                'ordersNoInvoice':   list(orders_no_invoice),
+            })
+
+        # ── Client-wide payment method totals ─────────────────────────────────
+        all_paid_invoices = Invoice.objects.filter(
+            client=client, status='PAID'
+        )
+        if date_from:
+            all_paid_invoices = all_paid_invoices.filter(
+                paid_at__date__gte=date_from)
+        if date_to:
+            all_paid_invoices = all_paid_invoices.filter(
+                paid_at__date__lte=date_to)
+
+        payment_method_totals = {}
+        for inv in all_paid_invoices:
+            method = (inv.payment_method or 'UNKNOWN').upper()
+            payment_method_totals[method] = round(
+                payment_method_totals.get(method, 0) + float(inv.amount_paid), 2)
+
+        # ── Orders missing any payment link ───────────────────────────────────
+        orders_no_invoice_count = Order.objects.filter(
+            client=client,
+            status__in=['DELIVERED', 'COMPLETED'],
+        ).exclude(
+            id__in=Invoice.objects.filter(
+                client=client).values_list('order_id', flat=True)
+        ).count()
+
+        return Response({
+            'generatedAt':   today.isoformat(),
+            'filters': {
+                'customerType': customer_type,
+                'status':       status_filter,
+                'dateFrom':     date_from,
+                'dateTo':       date_to,
+            },
+            'summary': {
+                'totalCustomers':         customers.count(),
+                'creditCustomers':        sum(1 for r in customer_rows if r['isCredit']),
+                'nonCreditCustomers':     sum(1 for r in customer_rows if not r['isCredit']),
+                'totalInvoiced':          round(float(totals['total_invoiced']),    2),
+                'totalPaid':              round(float(totals['total_paid']),         2),
+                'totalOutstanding':       round(float(totals['total_outstanding']),  2),
+                'paymentMethodBreakdown': payment_method_totals,
+                'ordersWithNoInvoice':    orders_no_invoice_count,
+            },
+            'customers': customer_rows,
+        })

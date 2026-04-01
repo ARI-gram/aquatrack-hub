@@ -52,6 +52,7 @@ export interface CreateCustomerRequest {
   full_name:         string;
   email:             string;
   customer_type?:    'REFILL' | 'ONETIME' | 'HYBRID';
+  send_invite?:     boolean;
   // Optional credit setup
   billing_cycle?:    BillingCycle;
   credit_limit?:     string;

@@ -19,6 +19,8 @@ from apps.products.store_views import (
     DirectSaleConsumableView,
 )
 
+from apps.deliveries.driver_store_views import ClientDriverVanStockView
+
 app_name = 'store'
 
 urlpatterns = [
@@ -46,4 +48,8 @@ urlpatterns = [
     path('bottles/expected-empties/',
          DriverExpectedEmptiesView.as_view(),
          name='bottles-expected-empties'),
+
+    # ── Driver Van Stock (both bottles and consumables) ───────────────────────
+    path('driver-stock/', ClientDriverVanStockView.as_view(),
+         name='driver-van-stock'),
 ]

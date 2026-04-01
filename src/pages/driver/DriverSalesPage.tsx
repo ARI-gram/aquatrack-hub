@@ -35,9 +35,9 @@ function dateLabel(s: string) {
 
 function parseCustomer(notes?: string): { name: string; phone: string } {
   if (!notes) return { name: 'Walk-in', phone: '' };
-  const custMatch = notes.match(/^Customer:\s*([^(·\n]+?)(?:\s*\(([^)]+)\))?(?:\s*·|$)/i);
+  const custMatch = notes.match(/Customer:\s*([^(·\n]+?)(?:\s*\(([^)]+)\))?(?:\s*·|$)/i);
   if (custMatch) return { name: custMatch[1].trim(), phone: custMatch[2]?.trim() ?? '' };
-  const walkMatch = notes.match(/^Walk-in:\s*([^·\n]+)/i);
+  const walkMatch = notes.match(/Walk-in:\s*([^·\n]+)/i);
   if (walkMatch) return { name: walkMatch[1].trim(), phone: '' };
   return { name: 'Walk-in', phone: '' };
 }
@@ -181,7 +181,7 @@ export const DriverSalesPage: React.FC = () => {
       customerName:  customerName || 'Walk-in Customer',
       customerPhone: phone || undefined,
       isWalkIn,
-      paymentMethod: 'CASH',
+      paymentMethod: (sale.payment_method || 'CASH') as DriverSaleData['paymentMethod'],
       servedBy,
       date:          sale.movement_date,
     };

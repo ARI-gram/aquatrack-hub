@@ -17,7 +17,7 @@ from django.shortcuts import get_object_or_404
 
 from apps.customers.authentication import CustomerJWTAuthentication
 from apps.orders.models import Order, OrderItem
-from apps.orders.serializers import OrderSerializer, OrderCreateSerializer
+from apps.orders.serializers import AdminOrderCreateSerializer, OrderSerializer, OrderCreateSerializer
 from apps.wallet.models import WalletTransaction
 
 from apps.notifications import notify
@@ -201,9 +201,11 @@ class AdminOrderListView(generics.ListAPIView):
         else:
             qs = Order.objects.none()
 
+        # Support comma-separated statuses e.g. ?status=PENDING,CONFIRMED
         status_filter = self.request.query_params.get('status')
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            statuses = [s.strip() for s in status_filter.split(',')]
+            qs = qs.filter(status__in=statuses)
 
         customer_id = self.request.query_params.get('customer_id')
         if customer_id:
@@ -259,3 +261,40 @@ class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
                 notify.order_cancelled(order, reason=reason)
 
         return Response(OrderSerializer(order).data)
+
+
+class AdminCreateOrderView(generics.CreateAPIView):
+    """
+    POST /api/orders/admin-create/
+
+    Client admin places an order on behalf of a customer
+    (phone/WhatsApp order). The order is created as CONFIRMED
+    and flagged as a manual order.
+
+    Requires: client_admin or site_manager role.
+    """
+    serializer_class = AdminOrderCreateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        return AdminOrderCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role not in ('client_admin', 'site_manager', 'super_admin'):
+            return Response(
+                {'error': 'Only admins can create orders on behalf of customers.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = AdminOrderCreateSerializer(
+            data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+
+        # Notify customer their order was placed
+        from apps.notifications import notify
+        notify.order_placed(order)
+
+        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)

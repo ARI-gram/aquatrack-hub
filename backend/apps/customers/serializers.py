@@ -201,10 +201,13 @@ class VerifyOTPSerializer(serializers.Serializer):
             customer.phone_verified_at = timezone.now()
             update_fields += ['is_phone_verified', 'phone_verified_at']
 
-        # If they can log in, they're registered — close the pending state
+        # Auto-complete registration if customer exists but never accepted invite
         if not customer.is_registered:
             customer.is_registered = True
-            update_fields.append('is_registered')
+            customer.is_phone_verified = True
+            customer.phone_verified_at = timezone.now()
+            customer.save(
+                update_fields=['is_registered', 'is_phone_verified', 'phone_verified_at'])
 
         customer.save(update_fields=update_fields)
         attrs['customer'] = customer

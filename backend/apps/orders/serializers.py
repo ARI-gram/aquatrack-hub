@@ -10,8 +10,6 @@ from apps.orders.models import Order, OrderItem, OrderDelivery, OrderTimeline, B
 from apps.customers.models import CustomerAddress
 from apps.products.models import Product
 
-DELIVERY_FEE = Decimal('50.00')
-
 
 # ── Nested read serializers ───────────────────────────────────────────────────
 
@@ -90,6 +88,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'subtotal', 'delivery_fee', 'discount_amount', 'total_amount',
             'payment_status', 'payment_method', 'paid_at',
             'special_instructions',
+            'is_manual_order', 'require_otp',   # ← ADD THESE TWO
             'items', 'delivery', 'timeline', 'bottle_exchange',
             'created_at', 'updated_at', 'customer_name', 'customer_phone',
         ]
@@ -250,9 +249,15 @@ class OrderCreateSerializer(serializers.Serializer):
         items_data = validated_data['items']
 
         subtotal = Decimal('0.00')
+        delivery_fee = Decimal('0.00')
+
         for item in items_data:
             subtotal += item['_product'].selling_price * item['quantity']
-        total_amount = subtotal + DELIVERY_FEE
+            product_fee = item['_product'].delivery_fee or Decimal('0.00')
+            if product_fee > delivery_fee:
+                delivery_fee = product_fee
+
+        total_amount = subtotal + delivery_fee
 
         order_type = self._derive_order_type(items_data)
         year = timezone.now().year
@@ -270,7 +275,7 @@ class OrderCreateSerializer(serializers.Serializer):
                 order_type=order_type,
                 status='PENDING',
                 subtotal=subtotal,
-                delivery_fee=DELIVERY_FEE,
+                delivery_fee=delivery_fee,
                 total_amount=total_amount,
                 payment_status='PENDING',
                 payment_method=validated_data['payment_method'],
@@ -354,3 +359,226 @@ class OrderCreateSerializer(serializers.Serializer):
         order.paid_at = timezone.now()
         order.status = 'CONFIRMED'
         order.save(update_fields=['payment_status', 'paid_at', 'status'])
+
+
+class AdminOrderCreateSerializer(serializers.Serializer):
+    """
+    Allows a client_admin or site_manager to create an order on behalf
+    of any customer in their client. Used for phone/WhatsApp orders.
+
+    POST /api/orders/admin-create/
+    {
+        "customer_id":         "<uuid>",
+        "delivery_address_id": "<uuid>",          // OR
+        "delivery_address_text": "Westlands...",
+        "delivery_address_label": "Home",
+        "scheduled_date":      "YYYY-MM-DD",
+        "scheduled_time_slot": "9:00 AM - 12:00 PM",
+        "items": [{ "product_id": "<uuid>", "quantity": 2 }],
+        "payment_method":      "CASH",
+        "require_otp":         false,
+        "special_instructions": ""
+    }
+    """
+    customer_id = serializers.UUIDField()
+    delivery_address_id = serializers.UUIDField(required=False)
+    delivery_address_text = serializers.CharField(
+        required=False, allow_blank=False, max_length=500)
+    delivery_address_label = serializers.CharField(
+        required=False, allow_blank=True, max_length=100, default='Delivery address')
+    scheduled_date = serializers.DateField()
+    scheduled_time_slot = serializers.CharField(max_length=50)
+    items = OrderItemCreateSerializer(many=True, min_length=1)
+    payment_method = serializers.ChoiceField(
+        choices=['MPESA', 'CASH', 'WALLET', 'CREDIT'])
+    require_otp = serializers.BooleanField(default=True)
+    special_instructions = serializers.CharField(
+        required=False, allow_blank=True, default='')
+
+    def validate_customer_id(self, value):
+        from apps.customers.models import Customer
+        admin = self.context['request'].user
+        try:
+            customer = Customer.objects.get(id=value, client=admin.client)
+        except Customer.DoesNotExist:
+            raise serializers.ValidationError(
+                'Customer not found in your account.')
+        if customer.status == 'BLOCKED':
+            raise serializers.ValidationError(
+                'This customer account is blocked.')
+        self._customer = customer
+        return value
+
+    def validate_scheduled_date(self, value):
+        if value < timezone.now().date():
+            raise serializers.ValidationError(
+                'Scheduled date cannot be in the past.')
+        return value
+
+    def validate_items(self, items_data):
+        admin = self.context['request'].user
+        errors = []
+        for i, item in enumerate(items_data):
+            try:
+                product = Product.objects.get(
+                    id=item['product_id'],
+                    client=admin.client,
+                    status='ACTIVE',
+                    is_available=True,
+                )
+                item['_product'] = product
+            except Product.DoesNotExist:
+                errors.append(
+                    f"Item {i + 1}: product not found or not available.")
+        if errors:
+            raise serializers.ValidationError(errors)
+        return items_data
+
+    def validate(self, data):
+        has_id = bool(data.get('delivery_address_id'))
+        has_text = bool(data.get('delivery_address_text', '').strip())
+        if not has_id and not has_text:
+            raise serializers.ValidationError(
+                {'delivery_address': 'Please provide a delivery address.'})
+        if has_id and has_text:
+            data.pop('delivery_address_text', None)
+            data.pop('delivery_address_label', None)
+        return data
+
+    @staticmethod
+    def _derive_order_type(items_data) -> str:
+        units = {item['_product'].unit for item in items_data}
+        if units == {'LITRES'}:
+            return 'REFILL'
+        if units == {'BOTTLES'}:
+            return 'NEW_BOTTLE'
+        return 'MIXED'
+
+    def _resolve_address(self, validated_data, customer):
+        from apps.customers.models import CustomerAddress
+        address_id = validated_data.get('delivery_address_id')
+        if address_id:
+            try:
+                return CustomerAddress.objects.get(id=address_id, customer=customer, is_active=True)
+            except CustomerAddress.DoesNotExist:
+                # Admin may be using a customer's address — try without customer filter
+                return CustomerAddress.objects.get(id=address_id, is_active=True)
+        address_text = validated_data['delivery_address_text'].strip()
+        address_label = (validated_data.get(
+            'delivery_address_label') or 'Delivery address').strip()
+        from apps.customers.models import CustomerAddress
+        return CustomerAddress.objects.create(
+            customer=customer,
+            label=address_label,
+            address=address_text,
+            is_active=True,
+            is_default=False,
+        )
+
+    def create(self, validated_data):
+        from django.db import transaction
+        request = self.context['request']
+        admin = request.user
+        customer = self._customer
+        client = customer.client
+        items_data = validated_data['items']
+
+        subtotal = Decimal('0.00')
+        delivery_fee = Decimal('0.00')
+        for item in items_data:
+            subtotal += item['_product'].selling_price * item['quantity']
+            fee = item['_product'].delivery_fee or Decimal('0.00')
+            if fee > delivery_fee:
+                delivery_fee = fee
+        total_amount = subtotal + delivery_fee
+
+        order_type = self._derive_order_type(items_data)
+        year = timezone.now().year
+        last_order = Order.objects.order_by('-id').first()
+        seq = (last_order.pk if last_order else 0) + 1
+        order_number = f"ORD-{year}-{seq:06d}"
+
+        with transaction.atomic():
+            address = self._resolve_address(validated_data, customer)
+
+            order = Order.objects.create(
+                order_number=order_number,
+                customer=customer,
+                client=client,
+                order_type=order_type,
+                status='CONFIRMED',        # auto-confirm manual orders
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
+                total_amount=total_amount,
+                payment_status='PENDING',
+                payment_method=validated_data['payment_method'],
+                special_instructions=validated_data.get(
+                    'special_instructions', ''),
+                is_manual_order=True,
+                require_otp=validated_data['require_otp'],
+                created_by_admin=admin,
+            )
+
+            bottles_to_deliver = 0
+            bottles_to_collect = 0
+            for item_data in items_data:
+                product = item_data['_product']
+                qty = item_data['quantity']
+                OrderItem.objects.create(
+                    order=order,
+                    product=product,
+                    product_name=product.name,
+                    product_unit=product.unit,
+                    quantity=qty,
+                    unit_price=product.selling_price,
+                    subtotal=product.selling_price * qty,
+                )
+                bottles_to_deliver += qty
+                if product.unit == 'BOTTLES':
+                    bottles_to_collect += qty
+
+            OrderDelivery.objects.create(
+                order=order,
+                delivery_address=address,
+                scheduled_date=validated_data['scheduled_date'],
+                scheduled_time_slot=validated_data['scheduled_time_slot'],
+            )
+            BottleExchange.objects.create(
+                order=order,
+                bottles_to_deliver=bottles_to_deliver,
+                bottles_to_collect=bottles_to_collect,
+            )
+
+            if validated_data['payment_method'] == 'WALLET':
+                # Reuse wallet charge logic from OrderCreateSerializer
+                self._charge_wallet(order, customer, total_amount)
+
+            customer.last_order_date = timezone.now()
+            customer.save(update_fields=['last_order_date'])
+
+        return order
+
+    def _charge_wallet(self, order, customer, amount):
+        """Same wallet deduction logic as OrderCreateSerializer."""
+        if not hasattr(customer, 'wallet'):
+            raise serializers.ValidationError('Customer has no wallet.')
+        wallet = customer.wallet
+        if wallet.current_balance < amount:
+            raise serializers.ValidationError(
+                f'Insufficient wallet balance. Available: KES {wallet.current_balance}')
+        from apps.wallet.models import WalletTransaction
+        WalletTransaction.objects.create(
+            wallet=wallet, transaction_type='PAYMENT', amount=amount,
+            balance_before=wallet.current_balance,
+            balance_after=wallet.current_balance - amount,
+            order=order,
+            description=f'Payment for manual order {order.order_number}',
+            status='COMPLETED', completed_at=timezone.now(),
+        )
+        wallet.current_balance -= amount
+        wallet.total_spent = getattr(
+            wallet, 'total_spent', Decimal('0.00')) + amount
+        wallet.save(update_fields=['current_balance', 'total_spent'])
+        order.payment_status = 'PAID'
+        order.paid_at = timezone.now()
+        order.save(update_fields=['payment_status', 'paid_at'])

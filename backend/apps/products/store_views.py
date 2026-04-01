@@ -550,13 +550,6 @@ class DistributeBottlesView(APIView):
 
 
 class DirectSaleBottleView(APIView):
-    """
-    POST /api/store/bottles/direct-sale/
-
-    Notifies:
-      → Customer (PAYMENT_SUCCESS) — if the sale is linked to a known account
-      → Client admin (BOTTLES_LOW) — if warehouse stock drops below threshold
-    """
     permission_classes = [IsClientStaff]
 
     def post(self, request):
@@ -564,8 +557,8 @@ class DirectSaleBottleView(APIView):
         client = request.user.client
 
         try:
-            product = Product.objects.get(pk=data.get(
-                'product'), client=client, is_returnable=True)
+            product = Product.objects.get(
+                pk=data.get('product'), client=client, is_returnable=True)
         except Product.DoesNotExist:
             return Response({'error': 'Product not found.'}, status=404)
 
@@ -575,7 +568,17 @@ class DirectSaleBottleView(APIView):
 
         balance = _bottle_balance(product.id)
         if quantity > balance['full']:
-            return Response({'error': f'Only {balance["full"]} full bottles in stock.'}, status=400)
+            return Response(
+                {'error': f'Only {balance["full"]} full bottles in stock.'},
+                status=400,
+            )
+
+        # ── NEW: empties collected from customer during this sale ─────────────
+        try:
+            qty_collected = int(data.get('qty_collected', 0))
+        except (TypeError, ValueError):
+            qty_collected = 0
+        qty_collected = max(0, min(qty_collected, quantity))
 
         linked_customer = None
         customer_id = data.get('customer_id') or None
@@ -593,9 +596,29 @@ class DirectSaleBottleView(APIView):
             qty_good=quantity,
             customer_id=customer_id,
             customer_name=data.get('customer_name', ''),
+            unit_price=product.selling_price,
+            total_amount=product.selling_price * quantity,
+            payment_method=data.get('payment_method', 'CASH'),
             notes=data.get('notes', ''),
             recorded_by=request.user,
         )
+
+        # ── NEW: record returned empties into store stock ─────────────────────
+        if qty_collected > 0:
+            BottleMovement.objects.create(
+                product=product,
+                movement_type='RECEIVE_EMPTY',
+                qty_expected=quantity,
+                qty_good=qty_collected,
+                qty_damaged=0,
+                qty_missing=max(0, quantity - qty_collected),
+                customer_name=data.get('customer_name', ''),
+                notes=(
+                    f'Empties collected at store direct sale '
+                    f'(×{quantity} sold, ×{qty_collected} returned)'
+                ),
+                recorded_by=request.user,
+            )
 
         balance_after = _bottle_balance(product.id)
 
@@ -609,11 +632,18 @@ class DirectSaleBottleView(APIView):
         if balance_after['full'] < BOTTLES_LOW_THRESHOLD:
             notify.bottles_low(client, product.name, balance_after['full'])
 
-        return Response({'movement': BottleMovementSerializer(mv).data, 'balance': balance_after},
-                        status=status.HTTP_201_CREATED)
-
+        return Response(
+            {
+                'movement': BottleMovementSerializer(mv).data,
+                'balance': balance_after,
+                'qty_collected': qty_collected,            # ← new
+                'outstanding': max(0, quantity - qty_collected),  # ← new
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 # ── Consumable Views ──────────────────────────────────────────────────────────
+
 
 class ConsumableStoreView(APIView):
     """GET /api/store/consumables/"""
@@ -783,7 +813,10 @@ class DirectSaleConsumableView(APIView):
             quantity=quantity,
             customer_id=customer_id,
             customer_name=data.get('customer_name', ''),
-            unit_price=data.get('unit_price') or None,
+            unit_price=data.get('unit_price') or product.selling_price,
+            total_amount=(data.get('unit_price')
+                          or product.selling_price) * quantity,
+            payment_method=data.get('payment_method', 'CASH'),
             notes=data.get('notes', ''),
             recorded_by=request.user,
         )

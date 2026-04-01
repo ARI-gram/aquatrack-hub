@@ -8,13 +8,17 @@ from apps.invoices.views import (
     InvoiceMarkPaidView,
 )
 from apps.invoices.payment_views import (
+    PaymentReportView,
     RecordPaymentView,
     BulkPaymentView,
     MarkOverdueView,
     CustomerStatementView,
 )
+from apps.invoices.direct_sales_views import DirectSalesView
 
 urlpatterns = [
+    # Direct sales endpoint (for recording one-off sales without a customer account)
+    path('client/accounts/direct-sales/', DirectSalesView.as_view()),
 
     # ── Invoice list & detail ─────────────────────────────────────────────────
     path('',
@@ -55,4 +59,7 @@ urlpatterns = [
     path('customer/<uuid:customer_id>/statement/',
          CustomerStatementView.as_view(),
          name='customer-statement'),
+
+    # ── Payment reporting ───────────────────────────────────────────────────
+    path('payment-report/', PaymentReportView.as_view(), name='payment-report'),
 ]

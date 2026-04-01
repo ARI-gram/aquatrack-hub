@@ -379,6 +379,7 @@ class DriverStockHistoryView(APIView):
                 'product_name':  product.name if product else '',
                 'quantity':      mv.qty_good + mv.qty_damaged + mv.qty_missing,
                 'notes':         mv.notes or None,
+                'payment_method': mv.payment_method or 'CASH',
                 'unit_price':    str(product.selling_price) if product and product.selling_price else None,
                 '_sort':         mv.movement_date,
             })
@@ -393,6 +394,7 @@ class DriverStockHistoryView(APIView):
                 'quantity':      mv.quantity,
                 'notes':         mv.notes or None,
                 'unit_price':    str(product.selling_price) if product and product.selling_price else None,
+                'payment_method': mv.payment_method or 'CASH',
                 '_sort':         mv.movement_date,
             })
 
@@ -429,7 +431,10 @@ class DriverRecordStockUseView(APIView):
                 customer = Customer.objects.get(
                     id=customer_id, client=request.user.client)
                 prefix = f'Customer: {customer.full_name} ({customer.phone_number or customer.email})'
-                notes = f'{prefix} · {notes}'.strip(' ·') if notes else prefix
+                # Only prepend if frontend hasn't already included it
+                if prefix not in (notes or ''):
+                    notes = f'{prefix} · {notes}'.strip(
+                        ' ·') if notes else prefix
             except Exception:
                 pass
 
@@ -480,7 +485,13 @@ class DriverRecordStockUseView(APIView):
                 product=product, driver=driver,
                 movement_type=movement_type,
                 qty_good=quantity, qty_damaged=0, qty_missing=0,
+                unit_price=product.selling_price,
+                total_amount=product.selling_price * quantity,
+                payment_method=request.data.get('payment_method', 'CASH'),
                 notes=notes,
+                recorded_by=driver,
+                customer_id=customer_id or None,
+                customer_name=request.data.get('customer_name', ''),
             )
 
             # Record the empty collection as a RECEIVE_EMPTY movement back to driver's stock
@@ -499,7 +510,15 @@ class DriverRecordStockUseView(APIView):
             movement = ConsumableMovement.objects.create(
                 product=product, driver=driver,
                 movement_type=movement_type,
-                quantity=quantity, notes=notes,
+                quantity=quantity,
+                unit_price=product.selling_price,
+                total_amount=product.selling_price * quantity,
+                payment_method=request.data.get('payment_method', 'CASH'),
+                notes=notes,
+                recorded_by=driver,
+                customer_id=customer_id or None,
+                customer_name=request.data.get('customer_name', ''),
+
             )
 
         if customer_id:
@@ -607,3 +626,118 @@ class ClientDirectSalesView(APIView):
 
         rows.sort(key=lambda r: r['movement_date'], reverse=True)
         return Response(rows[:300])
+
+# ── Client admin — van stock for ALL drivers ──────────────────────────────────
+
+
+class ClientDriverVanStockView(APIView):
+    """
+    GET /api/store/driver-stock/
+
+    Returns the current van inventory for every active driver in the client.
+    Only drivers who have at least one product on their van are included.
+
+    Response shape:
+      [
+        {
+          driver_id:      str,
+          driver_name:    str,
+          vehicle_number: str,
+          total_items:    int,   # sum of full bottles + in-stock consumables
+          bottles: [
+            { product_id, product_name, selling_price, balance: {full, empty, damaged, missing} }
+          ],
+          consumables: [
+            { product_id, product_name, unit, selling_price, balance: {in_stock} }
+          ]
+        },
+        ...
+      ]
+    """
+    permission_classes = [IsClientStaffInline]
+
+    def get(self, request):
+        from apps.authentication.models import User as AuthUser
+
+        client = request.user.client
+
+        drivers = AuthUser.objects.filter(
+            client=client,
+            role='driver',
+            is_active=True,
+        ).order_by('first_name', 'last_name')
+
+        result = []
+
+        for driver in drivers:
+            # ── Bottles ────────────────────────────────────────────────────
+            bottle_product_ids = (
+                BottleMovement.objects
+                .filter(driver=driver, product__is_returnable=True)
+                .values_list('product_id', flat=True)
+                .distinct()
+            )
+            bottle_products = Product.objects.filter(
+                id__in=bottle_product_ids,
+                client=client,
+                status='ACTIVE',
+            )
+
+            bottles = []
+            for product in bottle_products:
+                balance = _compute_bottle_balance(driver, product)
+                # Only include if there is anything on the van
+                if any([balance['full'], balance['empty'], balance['damaged'], balance['missing']]):
+                    bottles.append({
+                        'product_id':    str(product.id),
+                        'product_name':  product.name,
+                        'selling_price': str(product.selling_price) if product.selling_price else None,
+                        'balance':       balance,
+                    })
+
+            # ── Consumables ────────────────────────────────────────────────
+            consumable_product_ids = (
+                ConsumableMovement.objects
+                .filter(driver=driver, product__is_returnable=False)
+                .values_list('product_id', flat=True)
+                .distinct()
+            )
+            consumable_products = Product.objects.filter(
+                id__in=consumable_product_ids,
+                client=client,
+                status='ACTIVE',
+            )
+
+            consumables = []
+            for product in consumable_products:
+                balance = _compute_consumable_balance(driver, product)
+                if balance['in_stock'] > 0:
+                    consumables.append({
+                        'product_id':    str(product.id),
+                        'product_name':  product.name,
+                        'unit':          product.unit or '',
+                        'selling_price': str(product.selling_price) if product.selling_price else None,
+                        'balance':       balance,
+                    })
+
+            # Skip entirely idle drivers
+            if not bottles and not consumables:
+                continue
+
+            total_items = (
+                sum(b['balance']['full'] for b in bottles) +
+                sum(c['balance']['in_stock'] for c in consumables)
+            )
+
+            result.append({
+                'driver_id':      str(driver.id),
+                'driver_name':    f'{driver.first_name} {driver.last_name}'.strip() or driver.email,
+                'vehicle_number': getattr(driver, 'vehicle_number', '') or '',
+                'total_items':    total_items,
+                'bottles':        bottles,
+                'consumables':    consumables,
+            })
+
+        # Sort: most stock first
+        result.sort(key=lambda r: r['total_items'], reverse=True)
+        return Response(result)

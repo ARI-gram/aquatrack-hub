@@ -249,6 +249,45 @@ class DriverCustomerListView(APIView):
             for c in customers
         ])
 
+
+class DriverCustomerDetailView(APIView):
+    """GET /api/driver/customers/<uuid:customer_id>/"""
+    permission_classes = [IsDriver]
+
+    def get(self, request, customer_id):
+        from apps.customers.models import Customer
+        from apps.customers.invoice_models import CreditTerms
+
+        try:
+            customer = Customer.objects.get(
+                id=customer_id,
+                client=request.user.client,
+                status='ACTIVE',
+            )
+        except Customer.DoesNotExist:
+            return Response({'error': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        credit_terms = None
+        try:
+            ct = customer.credit_terms
+            credit_terms = {
+                'account_frozen':        ct.account_frozen,
+                'is_in_grace_period':    ct.is_in_grace_period,
+                'grace_days_remaining':  ct.grace_days_remaining,
+                'billing_cycle_display': ct.get_billing_cycle_display(),
+                'available_credit':      str(ct.available_credit),
+            }
+        except CreditTerms.DoesNotExist:
+            pass  # credit_terms stays None → frontend hides Credit option
+
+        return Response({
+            'id':           str(customer.id),
+            'name':         customer.full_name,
+            'phone':        customer.phone_number or '',
+            'email':        customer.email or '',
+            'credit_terms': credit_terms,
+        })
+
 # ─── DRIVER VIEWS ─────────────────────────────────────────────────────────────
 
 
@@ -739,15 +778,18 @@ class DriverCompleteDeliveryView(APIView):
             delivery.status = next_status
         delivery.save()
 
-        # OTP gate — only enforced when an OTP record exists
-        try:
-            if not delivery.otp.is_verified:
-                return Response(
-                    {'error': 'Please verify the customer code first.',
-                        'requires_otp': True},
-                    status=status.HTTP_400_BAD_REQUEST)
-        except DeliveryOTP.DoesNotExist:
-            pass
+        # REPLACE WITH:
+        order_requires_otp = getattr(delivery.order, 'require_otp', True)
+        if order_requires_otp:
+            try:
+                if not delivery.otp.is_verified:
+                    return Response(
+                        {'error': 'Please verify the customer code first.',
+                            'requires_otp': True},
+                        status=status.HTTP_400_BAD_REQUEST)
+            except DeliveryOTP.DoesNotExist:
+                pass
+        # If require_otp=False, skip OTP gate entirely — driver completes directly
 
         serializer = DriverCompleteDeliverySerializer(data=request.data)
         if not serializer.is_valid():

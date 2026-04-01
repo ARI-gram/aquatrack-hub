@@ -58,6 +58,7 @@ import {
 import axiosInstance from '@/api/axios.config';
 import { toast } from 'sonner';
 import { MakeDeliveryDialog } from '@/components/dialogs/MakeDeliveryDialog';
+import { CreateOrderDialog } from '@/components/dialogs/CreateOrderDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -642,6 +643,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   const [dateFilter, setDateFilter]       = useState('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [makeDeliveryOpen, setMakeDeliveryOpen] = useState(false);
+  const [createOrderOpen, setCreateOrderOpen] = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -719,6 +721,10 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
     );
   }, []);
 
+  const handleOrderCreated = useCallback((_order: { id: string; order_number: string; customer_name: string }) => {
+    fetchOrders();
+  }, [fetchOrders]);
+
   // ── Client-side search ─────────────────────────────────────────────────────
 
   const filteredOrders = orders.filter(o => {
@@ -763,21 +769,33 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   return (
     <Wrapper>
 
-      {/* ── Top bar: Make Delivery CTA ── */}
       <div className="flex items-center justify-between gap-3 mb-6">
         <div className="flex-1" />
-        <Button
-          className="gap-2 h-10 rounded-xl font-semibold shadow-sm"
-          onClick={() => setMakeDeliveryOpen(true)}
-        >
-          <Truck className="h-4 w-4" />
-          Make Delivery
-          {unassignedCount > 0 && (
-            <span className="ml-0.5 inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-white/20 text-[10px] font-bold px-1">
-              {unassignedCount}
-            </span>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* NEW: Create Order (manual/phone orders) */}
+          <Button
+            variant="outline"
+            className="gap-2 h-10 rounded-xl font-semibold"
+            onClick={() => setCreateOrderOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            Create Order
+          </Button>
+      
+          {/* Existing: Make Delivery */}
+          <Button
+            className="gap-2 h-10 rounded-xl font-semibold shadow-sm"
+            onClick={() => setMakeDeliveryOpen(true)}
+          >
+            <Truck className="h-4 w-4" />
+            Make Delivery
+            {unassignedCount > 0 && (
+              <span className="ml-0.5 inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-white/20 text-[10px] font-bold px-1">
+                {unassignedCount}
+              </span>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Stats strip */}
@@ -932,6 +950,12 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
         open={makeDeliveryOpen}
         onClose={() => setMakeDeliveryOpen(false)}
         onDeliveryMade={handleDeliveryMade}
+      />
+
+      <CreateOrderDialog
+        open={createOrderOpen}
+        onClose={() => setCreateOrderOpen(false)}
+        onCreated={handleOrderCreated}
       />
 
     </Wrapper>

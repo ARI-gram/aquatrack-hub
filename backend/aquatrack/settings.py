@@ -105,6 +105,14 @@ DATABASES = {
 #     }
 # }
 
+# Cache (used for password reset tokens)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache_table',
+    }
+}
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {

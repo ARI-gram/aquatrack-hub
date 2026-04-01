@@ -666,11 +666,22 @@ export const MakeDeliveryDialog: React.FC<MakeDeliveryDialogProps> = ({
   const loadOrders = useCallback(async () => {
     setIsLoadingOrders(true);
     try {
-      const res = await axiosInstance.get<OrderListResponse>('/orders/all/', {
-        params: { status: 'PENDING' }
-      });
-      const raw = extractOrders(res.data);
-      setAllOrders(raw.filter(o => !o.delivery?.driver_name));
+      // Fetch PENDING and CONFIRMED separately then merge
+      const [pendingRes, confirmedRes] = await Promise.all([
+        axiosInstance.get<OrderListResponse>('/orders/all/', {
+          params: { status: 'PENDING' }
+        }),
+        axiosInstance.get<OrderListResponse>('/orders/all/', {
+          params: { status: 'CONFIRMED' }
+        }),
+      ]);
+
+      const pending   = extractOrders(pendingRes.data);
+      const confirmed = extractOrders(confirmedRes.data);
+      const combined  = [...pending, ...confirmed];
+
+      // Keep only unassigned ones
+      setAllOrders(combined.filter(o => !o.delivery?.driver_name));
     } catch {
       toast.error('Could not load orders.');
       setAllOrders([]);

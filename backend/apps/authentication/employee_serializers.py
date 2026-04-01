@@ -25,6 +25,10 @@ class EmployeeSerializer(serializers.ModelSerializer):
     isVerified = serializers.BooleanField(source='is_verified', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     lastLogin = serializers.DateTimeField(source='last_login', read_only=True)
+    mustChangePassword = serializers.BooleanField(
+        source='must_change_password', read_only=True)
+    passwordChangedAt = serializers.DateTimeField(
+        source='password_changed_at',  read_only=True)
     numberPlate = serializers.CharField(
         source='vehicle_number',
         read_only=True,
@@ -46,6 +50,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'isVerified',
             'createdAt',
             'lastLogin',
+            'mustChangePassword',
+            'passwordChangedAt',
         ]
 
     def get_fullName(self, obj):
@@ -113,6 +119,8 @@ class EmployeeCreateSerializer(serializers.Serializer):
             is_active=True,
             is_verified=False,
             vehicle_number=validated_data.get('number_plate') or '',
+            must_change_password=True,
+            password_changed_at=None,
         )
 
         self._temp_password = temp_password

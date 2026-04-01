@@ -109,24 +109,32 @@ class OrderSummarySerializer(serializers.Serializer):
     id = serializers.UUIDField(source='order.id')
     order_number = serializers.CharField(source='order.order_number')
     order_type = serializers.CharField(source='order.order_type')
+
+    # ── Financial fields ──────────────────────────────────────────────
+    subtotal = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source='order.subtotal')
+    delivery_fee = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source='order.delivery_fee')
+    discount_amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source='order.discount_amount')
     total_amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, source='order.total_amount')
-    items_count = serializers.IntegerField(source='order.items.count')
+    payment_method = serializers.CharField(source='order.payment_method')
+    payment_status = serializers.CharField(source='order.payment_status')
+    # ─────────────────────────────────────────────────────────────────
 
-    # These DO exist on OrderDelivery
+    items_count = serializers.IntegerField(source='order.items.count')
     scheduled_date = serializers.DateField(
-        source='order.delivery.scheduled_date',      allow_null=True)
+        source='order.delivery.scheduled_date', allow_null=True)
     scheduled_time_slot = serializers.CharField(
         source='order.delivery.scheduled_time_slot', allow_null=True)
-
-    # Bottle exchange info if applicable
     bottles_to_deliver = serializers.IntegerField(
         source='order.bottle_exchange.bottles_to_deliver', allow_null=True)
     bottles_to_collect = serializers.IntegerField(
         source='order.bottle_exchange.bottles_to_collect', allow_null=True)
 
-
 # ── NEW: per-item serializer ──────────────────────────────────────────────────
+
 
 class OrderItemSerializer(serializers.Serializer):
     """

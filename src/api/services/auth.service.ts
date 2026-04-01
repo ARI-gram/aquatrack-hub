@@ -45,6 +45,8 @@ interface BackendLoginResponse {
     created_at: string;
     updated_at?: string;
     last_login: string | null;
+    must_change_password: boolean;
+    password_changed_at: string | null;
     avatar?: string;
   };
   tokens: {
@@ -80,6 +82,8 @@ export const authService = {
       clientId: backendUser.client ?? undefined,
       createdAt: backendUser.created_at,
       updatedAt: backendUser.updated_at ?? backendUser.created_at,
+      must_change_password: backendUser.must_change_password ?? false,
+      password_changed_at:  backendUser.password_changed_at  ?? null, 
     };
 
     return {
@@ -129,7 +133,11 @@ export const authService = {
   async resetPassword(data: ResetPasswordRequest): Promise<{ message: string }> {
     const response = await axiosInstance.post<{ message: string }>(
       API_ENDPOINTS.AUTH.RESET_PASSWORD,
-      data
+      {
+        token:                data.token,
+        new_password:         data.newPassword,       // ← snake_case for Django
+        new_password_confirm: data.confirmPassword,
+      }
     );
     return response.data;
   },
@@ -180,6 +188,8 @@ export const authService = {
       clientId: u.client ?? undefined,
       createdAt: u.created_at,
       updatedAt: u.updated_at ?? u.created_at,
+      must_change_password: u.must_change_password ?? false,
+      password_changed_at:  u.password_changed_at  ?? null,
     };
   },
 };

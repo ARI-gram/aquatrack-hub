@@ -9,6 +9,8 @@ import uuid
 from django.db import models
 from django.core.validators import MinValueValidator
 from decimal import Decimal
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 
 class Invoice(models.Model):
@@ -130,3 +132,23 @@ class InvoiceItem(models.Model):
 
     def __str__(self):
         return f'{self.invoice.invoice_number} — {self.product_name} × {self.quantity}'
+
+
+@receiver(post_save, sender=Invoice)
+def sync_order_payment_status(sender, instance, **kwargs):
+    """
+    When an invoice is marked PAID, sync the linked order's payment_status.
+    This single signal covers all payment paths:
+      - InvoiceMarkPaidView (/mark-paid/)
+      - RecordPaymentView   (/record-payment/)
+      - BulkPaymentView     (/bulk-payment/)
+    """
+    if instance.status == 'PAID':
+        order = instance.order
+        if order.payment_status != 'PAID':
+            from django.utils import timezone
+            order.payment_status = 'PAID'
+            order.paid_at = instance.paid_at or timezone.now()
+            order.payment_method = instance.payment_method or order.payment_method
+            order.save(update_fields=['payment_status',
+                       'paid_at', 'payment_method', 'updated_at'])

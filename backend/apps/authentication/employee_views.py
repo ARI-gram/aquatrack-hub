@@ -366,7 +366,10 @@ class EmployeeResetPasswordView(APIView):
             allowed_chars='abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789',
         )
         employee.set_password(temp_password)
-        employee.save(update_fields=['password'])
+        employee.must_change_password = True
+        employee.password_changed_at = None
+        employee.save(
+            update_fields=['password', 'must_change_password', 'password_changed_at'])
 
         frontend_url = getattr(settings, 'FRONTEND_URL',
                                'http://localhost:5173')

@@ -11,6 +11,7 @@ import { ProtectedRoute } from "@/routes/ProtectedRoute";
 // Auth Pages
 import { LoginPage } from "@/pages/auth/LoginPage";
 import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "@/pages/auth/ResetPasswordPage";
 import UnauthorizedPage from "@/pages/UnauthorizedPage";
 import NotFound from "@/pages/NotFound";
 
@@ -29,22 +30,25 @@ import { CustomersPage } from "@/pages/client/CustomersPage";
 import { CustomerDetailPage } from "@/pages/client/CustomerDetailPage";
 import InvoicesPage from "@/pages/client/InvoicesPage";
 import ProductsPage from "./pages/client/ProductsPage";
-import ReportsPage from "@/pages/client/ReportsPage";
+import ClientReportsPage from "@/pages/client/ReportsPage";
 import EmployeesPage from "@/pages/client/EmployeesPage";
 import ClientSettingsPage from "@/pages/client/SettingsPage";
 import StorePage from "@/pages/client/StorePage";
 import DirectSalesPage from '@/pages/client/DirectSalesPage';
 
 // Accounts Pages
+import AccountantDashboard from '@/pages/accounts/AccountantDashboard';
 import AccountingSettingsPage  from '@/pages/accounts/AccountingSettingsPage';
 import CustomerStatementPage   from '@/pages/accounts/CustomerStatementPage';
 import AccountantCustomersPage from '@/pages/accounts/AccountantCustomersPage';
 import AccountsReportsPage     from '@/pages/accounts/ReportsPage';
 import InvoicesListPage        from '@/pages/accounts/InvoicesListPage';
 import InvoiceDetailPage       from '@/pages/accounts/InvoiceDetailPage';
+import AccountingDirectSalesPage from "@/pages/accounts/DirectSalesPage";
 
 // Site Manager Pages
 import { SiteManagerDashboard } from "@/pages/manager/SiteManagerDashboard";
+import { DriversPage } from "@/pages/manager/DriversPage";
 
 // Driver Pages
 import { DriverDashboard } from "@/pages/driver/DriverDashboard";
@@ -76,6 +80,7 @@ import OrderTrackingPage from "@/pages/customer/OrderTrackingPage";
 
 // Shared notifications page (all roles)
 import SharedNotificationsPage from "@/pages/NotificationsPage";
+import ManagerReportsPage from "./pages/manager/ReportsPage";
 
 const queryClient = new QueryClient();
 
@@ -94,7 +99,7 @@ const RootRedirect = () => {
   }
 
   if (!isAuthenticated || !user) return <Navigate to={ROUTES.LOGIN} replace />;
-  if (user.role === 'accountant') return <Navigate to="/client/accounts/invoices" replace />;
+  if (user.role === 'accountant') return <Navigate to="/client/accounts/dashboard" replace />;
   return <Navigate to={roleDefaultRoutes[user.role]} replace />;
 };
 
@@ -105,6 +110,7 @@ const AppRoutes = () => (
     {/* ── Public staff auth ── */}
     <Route path={ROUTES.LOGIN}           element={<LoginPage />} />
     <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
+    <Route path={ROUTES.RESET_PASSWORD}  element={<ResetPasswordPage />} />  {/* ← missing */}
     <Route path="/unauthorized"          element={<UnauthorizedPage />} />
 
     {/* ── Customer public auth ── */}
@@ -127,7 +133,7 @@ const AppRoutes = () => (
     </Route>
 
     {/* ── Client Admin ── */}
-    <Route element={<ProtectedRoute allowedRoles={['client_admin', 'super_admin']} />}>
+    <Route element={<ProtectedRoute allowedRoles={['client_admin']} />}>
       <Route path={ROUTES.CLIENT_ADMIN.DASHBOARD}  element={<ClientAdminDashboard />} />
       <Route path={ROUTES.CLIENT_ADMIN.ORDERS}     element={<OrdersPage />} />
       <Route path={ROUTES.CLIENT_ADMIN.DELIVERIES} element={<DeliveriesPage />} />
@@ -136,7 +142,7 @@ const AppRoutes = () => (
       <Route path="/customers/:id"                  element={<CustomerDetailPage />} />
       <Route path={ROUTES.CLIENT_ADMIN.INVOICES}   element={<InvoicesPage />} />
       <Route path={ROUTES.CLIENT_ADMIN.PRODUCTS}   element={<ProductsPage />} />
-      <Route path={ROUTES.CLIENT_ADMIN.REPORTS}    element={<ReportsPage />} />
+      <Route path={ROUTES.CLIENT_ADMIN.REPORTS}    element={<ClientReportsPage />} />
       <Route path={ROUTES.CLIENT_ADMIN.EMPLOYEES}  element={<EmployeesPage />} />
       <Route path={ROUTES.CLIENT_ADMIN.SETTINGS}   element={<ClientSettingsPage />} />
       <Route path="/client/direct-sales"            element={<DirectSalesPage />} />
@@ -148,12 +154,14 @@ const AppRoutes = () => (
         DashboardLayout (client_admin) and AccountantLayout (accountant).
         ── */}
     <Route element={<ProtectedRoute allowedRoles={['client_admin', 'accountant', 'super_admin']} />}>
+      <Route path="/client/accounts/dashboard" element={<AccountantDashboard />} />
       <Route path="/client/accounts/invoices"                element={<InvoicesListPage />} />
       <Route path="/client/accounts/invoices/:id"            element={<InvoiceDetailPage />} />
       <Route path="/client/accounts/reports"                 element={<AccountsReportsPage />} />
       <Route path="/client/accounts/settings"                element={<AccountingSettingsPage />} />
       <Route path="/client/accounts/customers"               element={<AccountantCustomersPage />} />
       <Route path="/client/accounts/customers/:id/statement" element={<CustomerStatementPage />} />
+      <Route path="/client/accounts/direct-sales"            element={<AccountingDirectSalesPage />} />
     </Route>
 
     {/* ── Site Manager ── */}
@@ -161,9 +169,10 @@ const AppRoutes = () => (
       <Route path={ROUTES.SITE_MANAGER.DASHBOARD}    element={<SiteManagerDashboard />} />
       <Route path={ROUTES.SITE_MANAGER.ORDERS}       element={<OrdersPage       layout="manager" canCancel={false} />} />
       <Route path={ROUTES.SITE_MANAGER.DELIVERIES}   element={<DeliveriesPage   layout="manager" />} />
+      <Route path={ROUTES.SITE_MANAGER.DRIVERS}      element={<DriversPage />} />   {/* ← add this */}
       <Route path={ROUTES.SITE_MANAGER.STOCK}        element={<StorePage        layout="manager" />} />
       <Route path={ROUTES.SITE_MANAGER.DIRECT_SALES} element={<DirectSalesPage  layout="manager" />} />
-      <Route path={ROUTES.SITE_MANAGER.REPORTS}      element={<ReportsPage      layout="manager" readOnly />} />
+      <Route path={ROUTES.SITE_MANAGER.REPORTS}      element={<ManagerReportsPage />} />
     </Route>
 
     {/* ── Driver ── */}

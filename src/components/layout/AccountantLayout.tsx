@@ -4,19 +4,19 @@
  *
  * Clean, professional layout for the accountant role.
  * - Desktop: fixed left sidebar with accounts-focused nav
- * - Mobile: top bar + bottom nav (3 tabs — all fit without overflow)
+ * - Mobile: top bar + bottom nav (scrollable for all 6 items)
  * - Theme accent: violet (matches accountant role color)
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import {
   FileText, TrendingUp, Settings, LogOut, Users,
-  Droplets, ChevronLeft, Calculator, Bell,
-  User, ChevronDown,
+  Droplets, ChevronLeft, Calculator,
+  ShoppingBag, LayoutDashboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -37,10 +37,22 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
+    label:    'Dashboard',
+    path:     ROUTES.ACCOUNTANT.DASHBOARD,
+    icon:     LayoutDashboard,
+    sublabel: 'Financial overview',
+  },
+  {
     label:    'Invoices',
     path:     ROUTES.ACCOUNTANT.INVOICES,
     icon:     FileText,
     sublabel: 'Issue & manage',
+  },
+  {
+    label:    'Direct Sales',
+    path:     '/client/accounts/direct-sales',
+    icon:     ShoppingBag,
+    sublabel: 'One-off sales',
   },
   {
     label:    'Customers',
@@ -85,8 +97,14 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
   const location         = useLocation();
   const navigate         = useNavigate();
 
-  const isActive = (path: string) =>
-    location.pathname === path || location.pathname.startsWith(path + '/');
+  // Dashboard is active only when exactly on /client/accounts/dashboard,
+  // NOT when on /client/accounts/dashboard/... (no children, but being safe)
+  const isActive = (path: string) => {
+    if (path === ROUTES.ACCOUNTANT.DASHBOARD) {
+      return location.pathname === path;
+    }
+    return location.pathname === path || location.pathname.startsWith(path + '/');
+  };
 
   const initials    = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('') || '?';
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Accountant';
@@ -203,7 +221,7 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
         <header className="sticky top-0 z-20 flex h-14 items-center border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">
           <div className="flex items-center gap-2 flex-1 min-w-0">
 
-            {/* Mobile logo */}
+            {/* Mobile: back button or logo */}
             <div className="flex lg:hidden items-center gap-2 shrink-0">
               {showBackButton ? (
                 <button
@@ -242,7 +260,6 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
                 )}
               </div>
             ) : (
-              /* Mobile: show AquaTrack · Accounts */
               <div className="flex lg:hidden items-baseline gap-1.5 min-w-0">
                 <span className="text-base font-bold">AquaTrack</span>
                 <span className="text-xs text-violet-500 font-semibold">Accounts</span>
@@ -257,11 +274,7 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
             {/* Desktop profile dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="hidden lg:flex h-9 w-9 rounded-xl"
-                >
+                <Button variant="ghost" size="icon" className="hidden lg:flex h-9 w-9 rounded-xl">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-violet-600 text-white text-xs font-bold">
                       {initials}
@@ -273,9 +286,7 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
                 <DropdownMenuLabel>
                   <div className="flex flex-col gap-0.5">
                     <span>{displayName}</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {user?.email}
-                    </span>
+                    <span className="text-xs font-normal text-muted-foreground">{user?.email}</span>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -285,10 +296,7 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
                   </NavLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={logout}
-                  className="text-destructive focus:text-destructive"
-                >
+                <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
                   <LogOut className="h-4 w-4 mr-2" />Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -313,10 +321,10 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
         </main>
       </div>
 
-      {/* ─── Mobile Bottom Nav (3 tabs, no overflow needed) ─────────── */}
+      {/* ─── Mobile Bottom Nav — scrollable so all 6 items fit ───────── */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 lg:hidden border-t border-border bg-background/98 backdrop-blur-xl">
         <div
-          className="flex items-stretch justify-around px-2"
+          className="flex items-stretch overflow-x-auto scrollbar-none"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
           {NAV_ITEMS.map(item => {
@@ -326,22 +334,20 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
               <NavLink
                 key={item.path}
                 to={item.path}
-                className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
+                className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 pt-2 pb-2.5 min-h-[56px] min-w-[64px]"
               >
                 <div className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-2xl transition-all duration-200',
                   active ? 'bg-violet-600/15 scale-110' : 'scale-100',
                 )}>
                   <Icon className={cn(
-                    'h-[22px] w-[22px] transition-colors',
+                    'h-[20px] w-[20px] transition-colors',
                     active ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
                   )} />
                 </div>
                 <span className={cn(
-                  'text-[10px] font-semibold tracking-wide transition-colors',
-                  active
-                    ? 'text-violet-600 dark:text-violet-400'
-                    : 'text-muted-foreground',
+                  'text-[9px] font-semibold tracking-wide transition-colors whitespace-nowrap',
+                  active ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
                 )}>
                   {item.label}
                 </span>

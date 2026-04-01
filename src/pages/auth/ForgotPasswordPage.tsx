@@ -1,3 +1,4 @@
+// src/pages/auth/ForgotPasswordPage.tsx
 /**
  * Forgot Password Page
  * Route: /forgot-password
@@ -9,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { isAxiosError } from 'axios';
 import { ArrowLeft, Mail, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +23,9 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { ROUTES } from '@/constants/routes';
+import { useToast }    from '@/hooks/use-toast';
+import { ROUTES }      from '@/constants/routes';
+import authService     from '@/api/services/auth.service';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -30,29 +34,39 @@ const forgotPasswordSchema = z.object({
 type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>;
 
 const ForgotPasswordPage: React.FC = () => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading,   setIsLoading]   = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const { toast } = useToast();
 
   const form = useForm<ForgotPasswordFormData>({
     resolver: zodResolver(forgotPasswordSchema),
-    defaultValues: {
-      email: '',
-    },
+    defaultValues: { email: '' },
   });
 
   const onSubmit = async (data: ForgotPasswordFormData) => {
     setIsLoading(true);
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log('Password reset requested for:', data.email);
+      await authService.forgotPassword({ email: data.email });
+      // Always show success — backend never reveals if the email exists
       setIsSubmitted(true);
-    } catch (error) {
-      console.error('Failed to request password reset:', error);
+    } catch (error: unknown) {
+      let msg = 'Something went wrong. Please try again.';
+      if (isAxiosError(error)) {
+        const d = error.response?.data;
+        msg =
+          (typeof d?.detail === 'string'             ? d.detail              : null) ??
+          (Array.isArray(d?.email)                   ? d.email[0]            : null) ??
+          (Array.isArray(d?.non_field_errors)        ? d.non_field_errors[0] : null) ??
+          error.message ??
+          msg;
+      }
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
   };
+
+  // ── Success screen ────────────────────────────────────────────────────────
 
   if (isSubmitted) {
     return (
@@ -65,18 +79,36 @@ const ForgotPasswordPage: React.FC = () => {
           </div>
           <h1 className="text-2xl font-bold text-foreground mb-2">Check your email</h1>
           <p className="text-muted-foreground mb-6">
-            We've sent password reset instructions to your email address. Please check your inbox
-            and follow the link to reset your password.
+            If an account exists for{' '}
+            <span className="font-medium text-foreground">
+              {form.getValues('email')}
+            </span>
+            , you'll receive reset instructions shortly. Check your spam folder
+            if it doesn't arrive within a few minutes.
           </p>
-          <Link to={ROUTES.LOGIN}>
-            <Button variant="ocean" className="w-full">
-              Return to Login
+          <div className="space-y-3">
+            <Link to={ROUTES.LOGIN}>
+              <Button variant="ocean" className="w-full">
+                Return to Login
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              className="w-full text-sm text-muted-foreground"
+              onClick={() => {
+                setIsSubmitted(false);
+                form.reset();
+              }}
+            >
+              Try a different email
             </Button>
-          </Link>
+          </div>
         </Card>
       </div>
     );
   }
+
+  // ── Form screen ───────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-surface p-4">
@@ -129,10 +161,7 @@ const ForgotPasswordPage: React.FC = () => {
               disabled={isLoading}
             >
               {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending...
-                </>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Sending…</>
               ) : (
                 'Send Reset Instructions'
               )}

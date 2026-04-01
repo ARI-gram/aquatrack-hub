@@ -302,21 +302,49 @@ export const DeliveryReceiptModal: React.FC<DeliveryReceiptModalProps> = ({
     });
   }
 
-  const templateData: TemplateData = {
-    invoiceNumber:   receiptNumber,
-    date:            now,
-    status:          'PAID',
-    customerName:    delivery.customer_name,
-    customerPhone:   delivery.customer_phone,
-    customerAddress: delivery.full_address,
-    items,
-    subtotal:    totalAmount,
-    vatAmount:   0,
-    totalAmount,
-    paidAt:      now,
-    servedBy:    'Driver',
-    notes:       delivery.driver_notes,
-  };
+// Read real values from backend
+const subtotal     = detail?.order?.subtotal
+  ? parseFloat(String(detail.order.subtotal))
+  : totalAmount;
+const deliveryFee  = detail?.order?.delivery_fee
+  ? parseFloat(String(detail.order.delivery_fee))
+  : 0;
+const discount     = detail?.order?.discount_amount
+  ? parseFloat(String(detail.order.discount_amount))
+  : 0;
+const paymentMethod = detail?.order?.payment_method ?? delivery.order_payment_method ?? '';
+const paymentStatus = detail?.order?.payment_status ?? '';
+
+// Derive receipt status
+const isCreditOrder = paymentMethod === 'CREDIT';
+const isPaid        = paymentStatus === 'PAID';
+const receiptStatus = isCreditOrder ? 'UNPAID' : (isPaid ? 'PAID' : 'UNPAID');
+
+// VAT from settings
+const vatAmount = settings.vatRegistered
+  ? totalAmount - (totalAmount / (1 + settings.vatRate / 100))
+  : 0;
+
+const templateData: TemplateData = {
+  invoiceNumber:   receiptNumber,
+  date:            detail?.order?.scheduled_date
+                     ? new Date(detail.order.scheduled_date).toISOString()
+                     : now,
+  status:          receiptStatus,
+  customerName:    delivery.customer_name,
+  customerPhone:   delivery.customer_phone,
+  customerAddress: delivery.full_address,
+  items,
+  subtotal,
+  deliveryFees: deliveryFee,   // ← was `deliveryFee:`, now `deliveryFees:`
+  vatAmount,
+  totalAmount,
+  paidAt:          receiptStatus === 'PAID'
+                     ? (detail?.timeline?.completed?.toString() ?? now)
+                     : undefined,
+  servedBy:        detail?.driver_name ?? 'Driver',
+  notes:           delivery.driver_notes,
+};
 
   const { printRef, pdfLoading, handlePrint, handleDownloadPdf, handleWhatsApp } =
     useInvoicePrint({

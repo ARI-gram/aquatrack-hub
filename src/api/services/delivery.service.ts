@@ -66,11 +66,16 @@ export interface DriverDeliveryDetail {
     items_count: number;
     bottles_to_deliver?: number;
     bottles_to_collect?: number;
-    /** Nested from the full detail endpoint (not in OrderSummarySerializer) */
     items?: OrderItem[];
-    /** From OrderDelivery — available on the full detail endpoint */
     scheduled_date?: string;
     scheduled_time_slot?: string;
+
+    // ── Add these ──────────────────────────────────
+    subtotal?: string;
+    delivery_fee?: string;
+    discount_amount?: string;
+    payment_method?: string;
+    payment_status?: string;
   };
 
   customer: {
@@ -119,6 +124,9 @@ export interface ClientDelivery {
   estimated_arrival?: string;
   completed_at?: string;
   has_issues: boolean;
+  total_amount: number;
+  is_empty_return: boolean;
+  created_at: string;
 }
 
 export interface DeliveryStats {

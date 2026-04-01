@@ -1,21 +1,4 @@
-/**
- * AccountsLayout
- * src/pages/accounts/AccountsLayout.tsx
- *
- * Smart layout wrapper used by all accounts pages
- * (AccountingSettingsPage, InvoicesListPage, ReportsPage, InvoiceDetailPage).
- *
- * - If the current user is an `accountant` → renders AccountantLayout
- * - If the current user is `client_admin` or `super_admin` → renders DashboardLayout
- *
- * This means each accounts page only needs to import ONE layout and works
- * correctly regardless of which role is viewing it.
- *
- * Usage:
- *   <AccountsLayout title="Invoices" subtitle="All customer invoices">
- *     <YourPageContent />
- *   </AccountsLayout>
- */
+// src/pages/accounts/AccountsLayout.tsx
 
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,9 +20,20 @@ export const AccountsLayout: React.FC<AccountsLayoutProps> = ({
   showBackButton,
   onBack,
 }) => {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
 
-  if (user?.role === 'accountant') {
+  // ── Wait for auth to resolve before committing a layout shell ──────────────
+  // Without this guard, user is null on first render → DashboardLayout mounts →
+  // the client-admin shell renders even for accountants.
+  if (isLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (user.role === 'accountant') {
     return (
       <AccountantLayout
         title={title}
@@ -52,7 +46,7 @@ export const AccountsLayout: React.FC<AccountsLayoutProps> = ({
     );
   }
 
-  // client_admin and super_admin use the standard dashboard layout
+  // client_admin and super_admin
   return (
     <DashboardLayout title={title} subtitle={subtitle}>
       {children}

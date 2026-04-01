@@ -66,10 +66,10 @@ const clientAdminNav: NavItem[] = [
   { label: 'Products',     path: ROUTES.CLIENT_ADMIN.PRODUCTS,   icon: Package         },
   { label: 'Employees',    path: ROUTES.CLIENT_ADMIN.EMPLOYEES,  icon: UserCog         },
   { label: 'Settings',     path: ROUTES.CLIENT_ADMIN.SETTINGS,   icon: Settings        },
+  { label: 'Reports',      path: ROUTES.CLIENT_ADMIN.REPORTS,    icon: TrendingUp      },
   // ── Accounts section ────────────────────────────────────────────────────
   { label: 'Accounts',     path: '/client/accounts/settings',   icon: BookOpen    },
   { label: 'Invoices',     path: '/client/accounts/invoices',   icon: FileText    },
-  { label: 'Reports',      path: '/client/accounts/reports',    icon: TrendingUp  },
 ];
 
 const accountantNav: NavItem[] = [
@@ -77,6 +77,7 @@ const accountantNav: NavItem[] = [
   { label: 'Customers', path: '/client/accounts/customers', icon: Users       },
   { label: 'Reports',   path: '/client/accounts/reports',   icon: TrendingUp  },
   { label: 'Accounts',  path: '/client/accounts/settings',  icon: Calculator  },
+  { label: 'Direct Sales', path: '/client/accounts/direct-sales', icon: ShoppingBag },
 ];
 
 const driverNav: NavItem[] = [

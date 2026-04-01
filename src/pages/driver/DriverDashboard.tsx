@@ -1,15 +1,29 @@
 /**
  * src/pages/driver/DriverDashboard.tsx
- * Mobile-first dashboard — single column on phones, 3-col grid on desktop
+ * Rearranged for drivers on the go:
+ *  - "Next Stop" hero card pinned at top when a delivery is ACCEPTED
+ *  - Compact stats strip (no duplicate rate card)
+ *  - Quick Actions bar (Complete Delivery, Direct Sale, Request Top-up)
+ *  - Action buttons resized: icon-only Call/Nav + full-width primary action
+ *  - Desktop: single-col queue + thin completed sidebar (rate card removed)
+ *  - All original logic, state, and handlers preserved exactly
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DriverLayout } from '@/components/layout/DriverLayout';
 import {
   Truck, CheckCircle, MapPin, Clock, Navigation, Phone,
   Loader2, Search, Package, Users, ChevronRight, AlertCircle, X,
+  Zap, ArrowRight, CheckCircle2, ShoppingCart, RefreshCw,
 } from 'lucide-react';
 import { deliveryService, DriverDelivery } from '@/api/services/delivery.service';
+import {
+  driverStoreService,
+  type DriverBottleStock,
+  type DriverConsumableStock,
+} from '@/api/services/driver-store.service';
+import { CompleteDeliveryDialog } from '@/components/dialogs/CompleteDeliveryDialog';
+import { DirectSaleDialog } from '@/components/dialogs/DirectSaleDialog';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -24,15 +38,15 @@ interface DriverProfile {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; dot: string; pill: string; priority: number }> = {
-  ASSIGNED:    { label: 'New',         dot: 'bg-amber-400',   pill: 'bg-amber-50   text-amber-700   border-amber-200',   priority: 1 },
-  ACCEPTED:    { label: 'Accepted',    dot: 'bg-sky-500',     pill: 'bg-sky-50     text-sky-700     border-sky-200',     priority: 2 },
-  PICKED_UP:   { label: 'Picked Up',  dot: 'bg-violet-500',  pill: 'bg-violet-50  text-violet-700  border-violet-200',  priority: 3 },
-  EN_ROUTE:    { label: 'En Route',   dot: 'bg-blue-500',    pill: 'bg-blue-50    text-blue-700    border-blue-200',    priority: 4 },
-  ARRIVED:     { label: 'Arrived',    dot: 'bg-teal-500',    pill: 'bg-teal-50    text-teal-700    border-teal-200',    priority: 5 },
-  IN_PROGRESS: { label: 'In Progress',dot: 'bg-indigo-500',  pill: 'bg-indigo-50  text-indigo-700  border-indigo-200',  priority: 6 },
-  COMPLETED:   { label: 'Completed',  dot: 'bg-emerald-500', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', priority: 99 },
-  FAILED:      { label: 'Failed',     dot: 'bg-red-400',     pill: 'bg-red-50     text-red-700     border-red-200',     priority: 99 },
+const STATUS_CFG: Record<string, { label: string; dot: string; pill: string; bar: string; priority: number }> = {
+  ASSIGNED:    { label: 'New',          dot: 'bg-amber-400',   pill: 'bg-amber-50   text-amber-700   border-amber-200',   bar: 'bg-amber-400',   priority: 1 },
+  ACCEPTED:    { label: 'Accepted',     dot: 'bg-sky-500',     pill: 'bg-sky-50     text-sky-700     border-sky-200',     bar: 'bg-sky-500',     priority: 2 },
+  PICKED_UP:   { label: 'Picked Up',   dot: 'bg-violet-500',  pill: 'bg-violet-50  text-violet-700  border-violet-200',  bar: 'bg-violet-500',  priority: 3 },
+  EN_ROUTE:    { label: 'En Route',    dot: 'bg-blue-500',    pill: 'bg-blue-50    text-blue-700    border-blue-200',    bar: 'bg-blue-500',    priority: 4 },
+  ARRIVED:     { label: 'Arrived',     dot: 'bg-teal-500',    pill: 'bg-teal-50    text-teal-700    border-teal-200',    bar: 'bg-teal-500',    priority: 5 },
+  IN_PROGRESS: { label: 'In Progress', dot: 'bg-indigo-500',  pill: 'bg-indigo-50  text-indigo-700  border-indigo-200',  bar: 'bg-indigo-500',  priority: 6 },
+  COMPLETED:   { label: 'Completed',   dot: 'bg-emerald-500', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'bg-emerald-500', priority: 99 },
+  FAILED:      { label: 'Failed',      dot: 'bg-red-400',     pill: 'bg-red-50     text-red-700     border-red-200',     bar: 'bg-red-400',     priority: 99 },
 };
 
 function parseTimeSlot(slot: string): number {
@@ -62,70 +76,205 @@ const StatusPill: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
-// ── Delivery card ─────────────────────────────────────────────────────────────
+// ── Quick Action Bar ──────────────────────────────────────────────────────────
+// Placed between the progress bar and Next Stop hero for immediate visibility.
+
+const QuickActionBar: React.FC<{
+  onComplete: () => void;
+  onSale:     () => void;
+  onTopUp:    () => void;
+}> = ({ onComplete, onSale, onTopUp }) => {
+  const actions = [
+    {
+      key:     'complete',
+      label:   'Complete\nDelivery',
+      icon:    <CheckCircle2 className="h-4 w-4" />,
+      iconCls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400',
+      onClick: onComplete,
+    },
+    {
+      key:     'sale',
+      label:   'Direct\nSale',
+      icon:    <ShoppingCart className="h-4 w-4" />,
+      iconCls: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400',
+      onClick: onSale,
+    },
+    {
+      key:     'topup',
+      label:   'Request\nTop-up',
+      icon:    <RefreshCw className="h-4 w-4" />,
+      iconCls: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400',
+      onClick: onTopUp,
+    },
+  ];
+
+  return (
+    <div className="mb-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2.5">
+        Quick Actions
+      </p>
+      <div className="grid grid-cols-3 gap-2.5">
+        {actions.map(({ key, label, icon, iconCls, onClick }) => (
+          <button
+            key={key}
+            onClick={onClick}
+            className="flex flex-col items-center justify-center gap-1.5 h-[72px] rounded-2xl border border-border/60 bg-card hover:bg-muted/40 transition-all active:scale-[0.97] px-2"
+          >
+            <div className={cn('h-8 w-8 rounded-xl flex items-center justify-center shrink-0', iconCls)}>
+              {icon}
+            </div>
+            <span className="text-[11px] font-semibold text-muted-foreground text-center leading-tight whitespace-pre-line">
+              {label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ── Next Stop Hero Card ────────────────────────────────────────────────────────
+// Shown only when there is an ACCEPTED delivery — the driver's immediate focus.
+
+const NextStopHero: React.FC<{
+  delivery:   DriverDelivery;
+  onAccept:   (id: string) => void;
+  onNavigate: (id: string) => void;
+}> = ({ delivery, onAccept, onNavigate }) => (
+  <div className="relative rounded-2xl overflow-hidden mb-4 border border-primary/30 shadow-lg shadow-primary/5">
+    {/* Top stripe */}
+    <div className="h-1 w-full bg-primary" />
+
+    {/* Animated pulse badge */}
+    <div className="absolute top-4 right-4">
+      <span className="inline-flex items-center gap-1.5 text-[10px] font-black bg-primary text-primary-foreground rounded-full px-2.5 py-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground animate-pulse" />
+        NEXT STOP
+      </span>
+    </div>
+
+    <div className="p-4 pt-3.5">
+      {/* Customer name + order */}
+      <div className="mb-3 pr-24">
+        <p className="font-bold text-lg leading-tight truncate">{delivery.customer_name}</p>
+        <p className="text-xs text-muted-foreground font-mono mt-0.5">{delivery.order_number}</p>
+      </div>
+
+      {/* Address — prominent */}
+      <div className="flex items-start gap-2.5 bg-primary/5 border border-primary/15 rounded-xl px-3.5 py-3 mb-3">
+        <MapPin className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+        <span className="text-sm font-medium leading-relaxed line-clamp-2">{delivery.full_address}</span>
+      </div>
+
+      {/* Meta row */}
+      <div className="flex items-center gap-4 text-xs text-muted-foreground mb-4">
+        <span className="flex items-center gap-1.5 font-semibold">
+          <Clock className="h-3.5 w-3.5" />{delivery.scheduled_time_slot}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Package className="h-3.5 w-3.5" />{delivery.items_count} item{delivery.items_count !== 1 ? 's' : ''}
+        </span>
+        {(delivery.bottles_to_deliver ?? 0) > 0 && (
+          <span className="flex items-center gap-1.5 font-semibold text-blue-600">
+            <Truck className="h-3.5 w-3.5" />{delivery.bottles_to_deliver} btl
+          </span>
+        )}
+      </div>
+
+      {delivery.driver_notes && (
+        <div className="flex items-start gap-2 mb-4 bg-amber-50/80 border border-amber-100 rounded-xl px-3 py-2">
+          <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-700 italic">{delivery.driver_notes}</p>
+        </div>
+      )}
+
+      {/* Actions: compact icon buttons + big primary CTA */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => window.open(`tel:${delivery.customer_phone}`)}
+          className="h-12 w-12 shrink-0 rounded-xl border border-border/60 bg-muted/40 flex items-center justify-center hover:bg-muted transition-colors active:scale-90"
+          aria-label="Call customer"
+        >
+          <Phone className="h-4.5 w-4.5 text-muted-foreground" />
+        </button>
+        <button
+          onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(delivery.full_address)}`)}
+          className="h-12 w-12 shrink-0 rounded-xl border border-border/60 bg-muted/40 flex items-center justify-center hover:bg-muted transition-colors active:scale-90"
+          aria-label="Navigate"
+        >
+          <Navigation className="h-4.5 w-4.5 text-muted-foreground" />
+        </button>
+        <button
+          className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors active:scale-[0.98] shadow-md shadow-primary/20"
+          onClick={() => onNavigate(delivery.id)}
+        >
+          View Delivery <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+// ── Delivery Card (queue items) ───────────────────────────────────────────────
+// Slimmer than before: left bar + info + icon actions + primary CTA
 
 const DeliveryCard: React.FC<{
-  delivery:     DriverDelivery;
-  index:        number;
-  isNext:       boolean;
-  hasSibling:   boolean;
-  onAccept:     (id: string) => void;
-  onNavigate:   (id: string) => void;
+  delivery:   DriverDelivery;
+  index:      number;
+  isNext:     boolean;
+  hasSibling: boolean;
+  onAccept:   (id: string) => void;
+  onNavigate: (id: string) => void;
 }> = ({ delivery, index, isNext, hasSibling, onAccept, onNavigate }) => {
+  const cfg = STATUS_CFG[delivery.status] ?? STATUS_CFG['ASSIGNED'];
+
   return (
     <div className={cn(
       'relative rounded-2xl border overflow-hidden transition-all duration-200',
-      isNext
-        ? 'border-primary/40 shadow-md shadow-primary/5 bg-card'
-        : 'border-border/60 bg-card',
+      isNext ? 'border-primary/30 bg-card' : 'border-border/60 bg-card',
     )}>
       {/* Left accent bar */}
-      <div className={cn(
-        'absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl',
-        isNext ? 'bg-primary' : STATUS_CFG[delivery.status]?.dot ?? 'bg-border',
-      )} />
+      <div className={cn('absolute left-0 top-0 bottom-0 w-[3px]', cfg.bar)} />
 
-      <div className="pl-5 pr-4 pt-4 pb-4">
-        {/* Top row */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={cn(
-              'h-9 w-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0',
-              isNext ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-            )}>
-              {index + 1}
+      <div className="pl-4 pr-4 pt-3.5 pb-3.5">
+        {/* Top row: index + name + status */}
+        <div className="flex items-center gap-2.5 mb-2.5">
+          <span className={cn(
+            'h-7 w-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0',
+            isNext ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
+          )}>
+            {index + 1}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-semibold text-sm truncate">{delivery.customer_name}</p>
+              {hasSibling && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5 shrink-0">
+                  <Users className="h-2.5 w-2.5" />Multi
+                </span>
+              )}
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-semibold text-sm">{delivery.customer_name}</p>
-                {hasSibling && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5 shrink-0">
-                    <Users className="h-2.5 w-2.5" />Multi-stop
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{delivery.order_number}</p>
-            </div>
+            <p className="text-[11px] text-muted-foreground font-mono">{delivery.order_number}</p>
           </div>
           <StatusPill status={delivery.status} />
         </div>
 
-        {/* Address */}
-        <div className="flex items-start gap-2 text-xs text-muted-foreground mb-3 bg-muted/30 rounded-xl px-3 py-2.5">
-          <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground/60" />
-          <span className="line-clamp-2 leading-relaxed">{delivery.full_address}</span>
+        {/* Address — compact */}
+        <div className="flex items-start gap-2 text-xs text-muted-foreground mb-2.5 bg-muted/30 rounded-xl px-3 py-2">
+          <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground/60" />
+          <span className="line-clamp-1 leading-relaxed">{delivery.full_address}</span>
         </div>
 
-        {/* Meta */}
+        {/* Meta chips */}
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-3 flex-wrap">
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />{delivery.scheduled_time_slot}
           </span>
-          <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1">
             <Package className="h-3 w-3" />{delivery.items_count} item{delivery.items_count !== 1 ? 's' : ''}
           </span>
-          {delivery.bottles_to_deliver > 0 && (
-            <span className="flex items-center gap-1.5">
+          {(delivery.bottles_to_deliver ?? 0) > 0 && (
+            <span className="flex items-center gap-1 font-semibold text-blue-600">
               <Truck className="h-3 w-3" />{delivery.bottles_to_deliver} btl
             </span>
           )}
@@ -133,38 +282,40 @@ const DeliveryCard: React.FC<{
 
         {delivery.driver_notes && (
           <div className="flex items-start gap-2 mb-3 bg-amber-50/70 border border-amber-100 rounded-xl px-3 py-2">
-            <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-700 italic">{delivery.driver_notes}</p>
+            <AlertCircle className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-amber-700 italic">{delivery.driver_notes}</p>
           </div>
         )}
 
-        {/* Actions — full width on mobile, equal split */}
-        <div className="grid grid-cols-3 gap-2">
+        {/* Actions: icon buttons + primary CTA fills remaining width */}
+        <div className="flex items-center gap-2">
           <button
-            className="h-11 rounded-xl border border-border/60 bg-muted/30 text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-muted transition-colors active:scale-[0.97]"
+            className="h-10 w-10 shrink-0 rounded-xl border border-border/60 bg-muted/30 flex items-center justify-center hover:bg-muted transition-colors active:scale-90"
             onClick={() => window.open(`tel:${delivery.customer_phone}`)}
+            aria-label="Call"
           >
-            <Phone className="h-3.5 w-3.5" />Call
+            <Phone className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
-            className="h-11 rounded-xl border border-border/60 bg-muted/30 text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-muted transition-colors active:scale-[0.97]"
+            className="h-10 w-10 shrink-0 rounded-xl border border-border/60 bg-muted/30 flex items-center justify-center hover:bg-muted transition-colors active:scale-90"
             onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(delivery.full_address)}`)}
+            aria-label="Navigate"
           >
-            <Navigation className="h-3.5 w-3.5" />Nav
+            <Navigation className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           {delivery.status === 'ASSIGNED' ? (
             <button
-              className="h-11 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-primary/90 transition-colors active:scale-[0.97]"
+              className="flex-1 h-10 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-colors active:scale-[0.98]"
               onClick={() => onAccept(delivery.id)}
             >
               <CheckCircle className="h-3.5 w-3.5" />Accept
             </button>
           ) : (
             <button
-              className="h-11 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-primary/90 transition-colors active:scale-[0.97]"
+              className="flex-1 h-10 rounded-xl bg-muted/60 border border-border/60 text-foreground text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-muted transition-colors active:scale-[0.98]"
               onClick={() => onNavigate(delivery.id)}
             >
-              View<ChevronRight className="h-3.5 w-3.5" />
+              Open<ChevronRight className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
@@ -178,28 +329,37 @@ const DeliveryCard: React.FC<{
 export const DriverDashboard: React.FC = () => {
   const navigate = useNavigate();
 
-  const [profile,    setProfile]    = useState<DriverProfile | null>(null);
-  const [deliveries, setDeliveries] = useState<DriverDelivery[]>([]);
-  const [isLoading,  setIsLoading]  = useState(true);
-  const [search,     setSearch]     = useState('');
-  const [sortKey,    setSortKey]    = useState<SortKey>('status_active');
+  // ── State ─────────────────────────────────────────────────────────────────
+  const [profile,      setProfile]      = useState<DriverProfile | null>(null);
+  const [deliveries,   setDeliveries]   = useState<DriverDelivery[]>([]);
+  const [bottles,      setBottles]      = useState<DriverBottleStock[]>([]);
+  const [consumables,  setConsumables]  = useState<DriverConsumableStock[]>([]);
+  const [isLoading,    setIsLoading]    = useState(true);
+  const [search,       setSearch]       = useState('');
+  const [sortKey,      setSortKey]      = useState<SortKey>('status_active');
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [saleOpen,     setSaleOpen]     = useState(false);
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [profileData, deliveriesData] = await Promise.all([
+      const [profileData, deliveriesData, b, c] = await Promise.all([
         deliveryService.getDriverProfile(),
         deliveryService.getDriverDeliveries(),
+        driverStoreService.getBottleStock(),
+        driverStoreService.getConsumableStock(),
       ]);
       setProfile(profileData);
       setDeliveries(deliveriesData.deliveries || []);
+      setBottles(b);
+      setConsumables(c);
     } catch {
       toast.error('Failed to load dashboard data');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleAccept = async (deliveryId: string) => {
     try {
@@ -211,6 +371,13 @@ export const DriverDashboard: React.FC = () => {
     }
   };
 
+  const handleDone = useCallback(() => {
+    setCompleteOpen(false);
+    setSaleOpen(false);
+    loadData();
+  }, [loadData]);
+
+  // ── Computed values ───────────────────────────────────────────────────────
   const remaining  = deliveries.filter(d => isActive(d.status)).length;
   const completed  = deliveries.filter(d => d.status === 'COMPLETED').length;
   const totalItems = deliveries.reduce((s, d) => s + (d.items_count || 0), 0);
@@ -229,7 +396,7 @@ export const DriverDashboard: React.FC = () => {
       list = list.filter(d =>
         d.customer_name.toLowerCase().includes(q) ||
         d.order_number.toLowerCase().includes(q) ||
-        d.full_address.toLowerCase().includes(q)
+        d.full_address.toLowerCase().includes(q),
       );
     }
     return [...list].sort((a, b) => {
@@ -246,6 +413,10 @@ export const DriverDashboard: React.FC = () => {
   const completedDeliveries = deliveries.filter(d => d.status === 'COMPLETED');
   const nextDelivery        = activeDeliveries.find(d => d.status === 'ACCEPTED');
 
+  // Queue items exclude the nextDelivery hero (avoid duplication)
+  const queueDeliveries = activeDeliveries.filter(d => d.id !== nextDelivery?.id);
+
+  // ── Loading state ─────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <DriverLayout title="My Deliveries" subtitle="Loading…">
@@ -259,83 +430,117 @@ export const DriverDashboard: React.FC = () => {
   return (
     <DriverLayout
       title="My Deliveries"
-      subtitle={`Welcome, ${profile?.driver?.name || 'Driver'}`}
+      subtitle={profile?.driver?.name ? `Hi, ${profile.driver.name.split(' ')[0]}` : 'Dashboard'}
     >
-      {/* Stats — 2x2 grid on mobile */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
+
+      {/* ── Compact stats strip ── */}
+      <div className="grid grid-cols-4 gap-2 mb-4">
         {[
-          { label: 'Remaining',  val: remaining,         cls: 'bg-blue-50    text-blue-700    border-blue-200/60'    },
-          { label: 'Completed',  val: completed,         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200/60' },
-          { label: 'Total',      val: deliveries.length, cls: 'bg-muted/60   text-foreground  border-border/60'     },
-          { label: 'Items',      val: totalItems,        cls: 'bg-muted/60   text-foreground  border-border/60'     },
+          { label: 'To Go',  val: remaining,         cls: remaining > 0 ? 'bg-blue-50 text-blue-700 border-blue-200/60' : 'bg-muted/60 text-muted-foreground border-border/60' },
+          { label: 'Done',   val: completed,         cls: completed > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60' : 'bg-muted/60 text-muted-foreground border-border/60' },
+          { label: 'Total',  val: deliveries.length, cls: 'bg-muted/60 text-foreground border-border/60' },
+          { label: 'Items',  val: totalItems,        cls: 'bg-muted/60 text-foreground border-border/60' },
         ].map(({ label, val, cls }) => (
-          <div key={label} className={cn('rounded-2xl border px-3 py-3.5 text-center', cls)}>
-            <p className="text-2xl font-black leading-none tabular-nums">{val}</p>
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-70 mt-1.5">{label}</p>
+          <div key={label} className={cn('rounded-2xl border px-2 py-3 text-center', cls)}>
+            <p className="text-xl font-black leading-none tabular-nums">{val}</p>
+            <p className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-1">{label}</p>
           </div>
         ))}
       </div>
 
-      {/* Rate + progress */}
+      {/* ── Progress bar ── */}
       {deliveries.length > 0 && (
-        <div className="rounded-2xl border border-border/60 bg-card p-4 mb-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-muted-foreground">Completion rate</span>
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-bold text-muted-foreground">Progress</span>
             <span className={cn(
-              'text-sm font-black',
-              rate >= 80 ? 'text-emerald-600' : rate >= 50 ? 'text-amber-600' : 'text-red-600',
-            )}>{rate}%</span>
+              'text-[11px] font-black',
+              rate >= 80 ? 'text-emerald-600' : rate >= 50 ? 'text-amber-600' : 'text-muted-foreground',
+            )}>
+              {completed} / {deliveries.length} · {rate}%
+            </span>
           </div>
-          <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div
-              className={cn('h-full rounded-full transition-all duration-500',
-                rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-red-500'
+              className={cn(
+                'h-full rounded-full transition-all duration-700',
+                rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-blue-500',
               )}
               style={{ width: `${rate}%` }}
             />
           </div>
-          <p className="text-[11px] text-muted-foreground mt-1.5">{completed} of {deliveries.length} delivered</p>
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-3">
+      {/* ── Quick Actions ── */}
+      <QuickActionBar
+        onComplete={() => setCompleteOpen(true)}
+        onSale={()     => setSaleOpen(true)}
+        onTopUp={()    => navigate('/driver/store')}
+      />
 
-        {/* Delivery Queue */}
+      {/* ── Next Stop Hero ── only shown when a delivery is ACCEPTED */}
+      {nextDelivery && (
+        <>
+          <div className="flex items-center gap-2 mb-2">
+            <Zap className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="text-[11px] font-black uppercase tracking-widest text-primary">
+              Your next stop
+            </span>
+          </div>
+          <NextStopHero
+            delivery={nextDelivery}
+            onAccept={handleAccept}
+            onNavigate={id => navigate(`/driver/deliveries/${id}`)}
+          />
+        </>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+
+        {/* ── Delivery Queue ── */}
         <div className="lg:col-span-2 space-y-3">
+
+          {/* Queue header */}
           <div className="flex items-center gap-2">
-            <h2 className="font-bold text-base flex-1">Delivery Queue</h2>
+            <h2 className="font-bold text-sm flex-1">
+              {nextDelivery ? 'Up Next' : 'Delivery Queue'}
+            </h2>
             <span className="text-[11px] text-muted-foreground bg-muted px-2.5 py-1 rounded-full font-bold">
-              {activeDeliveries.length} active
+              {queueDeliveries.length} queued
             </span>
           </div>
 
           {/* Search + sort */}
-          <div className="space-y-2">
-            <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <input
                 type="search"
                 placeholder="Search customer, order, address…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full h-12 pl-10 pr-10 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
+                className="w-full h-11 pl-9 pr-9 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
               />
               {search && (
-                <button onClick={() => setSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <button
+                  onClick={() => setSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5 shrink-0">
               {([
                 { k: 'status_active' as SortKey, label: 'Status' },
-                { k: 'time_asc'     as SortKey, label: 'By Time' },
+                { k: 'time_asc'     as SortKey, label: 'Time'   },
               ]).map(s => (
                 <button
                   key={s.k}
                   onClick={() => setSortKey(s.k)}
                   className={cn(
-                    'text-[11px] font-bold px-3.5 py-2 rounded-full border transition-all',
+                    'text-[11px] font-bold px-3 py-2 rounded-xl border transition-all',
                     sortKey === s.k
                       ? 'bg-foreground text-background border-foreground'
                       : 'bg-muted/40 text-muted-foreground border-border/50',
@@ -349,26 +554,31 @@ export const DriverDashboard: React.FC = () => {
 
           {search && (
             <p className="text-[11px] text-muted-foreground">
-              {activeDeliveries.length} result{activeDeliveries.length !== 1 ? 's' : ''} for "{search}"
+              {queueDeliveries.length} result{queueDeliveries.length !== 1 ? 's' : ''} for "{search}"
               <button onClick={() => setSearch('')} className="ml-1.5 text-primary hover:underline">Clear</button>
             </p>
           )}
 
-          {activeDeliveries.length === 0 ? (
-            <div className="rounded-2xl border border-border/60 bg-muted/20 p-12 text-center">
-              <Package className="h-9 w-9 mx-auto mb-3 opacity-20" />
+          {/* List */}
+          {queueDeliveries.length === 0 ? (
+            <div className="rounded-2xl border border-border/60 bg-muted/20 py-12 text-center">
+              <Package className="h-8 w-8 mx-auto mb-2.5 opacity-20" />
               <p className="text-sm font-medium text-muted-foreground">
-                {search ? 'No results found' : 'No active deliveries'}
+                {search
+                  ? 'No results found'
+                  : nextDelivery
+                  ? 'No other active deliveries'
+                  : 'No active deliveries'}
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {activeDeliveries.map((delivery, i) => (
+            <div className="space-y-2.5">
+              {queueDeliveries.map((delivery, i) => (
                 <DeliveryCard
                   key={delivery.id}
                   delivery={delivery}
                   index={i}
-                  isNext={nextDelivery?.id === delivery.id}
+                  isNext={false}
                   hasSibling={(customerCount[delivery.customer_name] ?? 0) > 1}
                   onAccept={handleAccept}
                   onNavigate={id => navigate(`/driver/deliveries/${id}`)}
@@ -378,40 +588,17 @@ export const DriverDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Completed sidebar — collapses nicely on mobile */}
-        <div className="space-y-4">
-          {/* Rate card */}
-          <div className="rounded-2xl border border-border/60 bg-card p-5 text-center">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
-              Today's Rate
-            </p>
-            <p className={cn(
-              'text-5xl font-black tabular-nums',
-              rate >= 80 ? 'text-emerald-600' : rate >= 50 ? 'text-amber-600' : 'text-red-600',
-            )}>{rate}%</p>
-            <p className="text-xs text-muted-foreground mt-2">
-              {completed} of {deliveries.length} delivered
-            </p>
-            <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className={cn('h-full rounded-full transition-all duration-500',
-                  rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-red-500'
-                )}
-                style={{ width: `${rate}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Completed list */}
-          {completedDeliveries.length > 0 && (
-            <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
+        {/* ── Completed sidebar (desktop only) ── */}
+        {completedDeliveries.length > 0 && (
+          <div className="hidden lg:block">
+            <div className="rounded-2xl border border-border/60 bg-card overflow-hidden sticky top-20">
               <div className="px-4 py-3 border-b border-border/40 bg-muted/20 flex items-center gap-2">
                 <CheckCircle className="h-4 w-4 text-emerald-600" />
                 <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Completed · {completedDeliveries.length}
                 </p>
               </div>
-              <div className="p-3 space-y-1.5">
+              <div className="p-3 space-y-1.5 max-h-[60vh] overflow-y-auto">
                 {completedDeliveries.map(d => (
                   <button
                     key={d.id}
@@ -427,9 +614,57 @@ export const DriverDashboard: React.FC = () => {
                 ))}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
       </div>
+
+      {/* ── Completed deliveries on mobile (compact list at bottom) ── */}
+      {completedDeliveries.length > 0 && (
+        <div className="mt-4 lg:hidden">
+          <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border/40 bg-muted/20 flex items-center gap-2">
+              <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Completed · {completedDeliveries.length}
+              </p>
+            </div>
+            <div className="p-2.5 space-y-1">
+              {completedDeliveries.map(d => (
+                <button
+                  key={d.id}
+                  onClick={() => navigate(`/driver/deliveries/${d.id}`)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors active:scale-[0.98] group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="text-sm font-medium truncate">{d.customer_name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    <span className="text-[10px] text-muted-foreground">{d.scheduled_time_slot}</span>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dialogs ── */}
+      <CompleteDeliveryDialog
+        open={completeOpen}
+        onClose={() => setCompleteOpen(false)}
+        onDone={handleDone}
+      />
+      <DirectSaleDialog
+        open={saleOpen}
+        onClose={() => setSaleOpen(false)}
+        onDone={handleDone}
+        bottles={bottles}
+        consumables={consumables}
+      />
+
     </DriverLayout>
   );
 };

@@ -71,6 +71,23 @@ class Order(models.Model):
 
     special_instructions = models.TextField(blank=True)
 
+    # Manual order support
+    is_manual_order = models.BooleanField(
+        default=False,
+        help_text="True when a client admin places an order on behalf of a customer (phone/WhatsApp order)",
+    )
+    require_otp = models.BooleanField(
+        default=True,
+        help_text="If False, driver can complete delivery without customer OTP verification",
+    )
+    created_by_admin = models.ForeignKey(
+        'authentication.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='manually_created_orders',
+        help_text="Admin who placed this order on behalf of the customer",
+    )
+
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
     cancelled_by = models.ForeignKey(

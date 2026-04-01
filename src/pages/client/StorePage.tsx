@@ -14,6 +14,8 @@
  *  ✅ Product dropdowns: show image, unit label, and stock count in all dialogs
  *  ✅ Fix: <button> inside <button> in BottleListRow and ConsumableListRow
  *  ✅ DirectSaleDialog: shows receipt modal (DriverSaleReceiptModal) after successful sale
+ *  ✅ Driver Stock tab: ENHANCED — search, sort, filter chips, grid/list/compact views,
+ *     summary stats bar, group-by-status, color-coded avatars, animated stock bars
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -39,6 +41,7 @@ import {
   ImageOff, CalendarDays, ArrowUpDown, Layers,
   ChevronLeft, SlidersHorizontal, Filter, Users,
   ChevronDown, CheckCircle2, AlertTriangle, TrendingDown, TrendingUp,
+  AlignJustify, ChevronRight, Phone, Plus, Check, UserCheck, Minus,
 } from 'lucide-react';
 import { useToast }    from '@/hooks/use-toast';
 import { useAuth }     from '@/contexts/AuthContext';
@@ -47,13 +50,16 @@ import { cn }          from '@/lib/utils';
 import {
   bottleStoreService,
   consumableStoreService,
+  driverVanStockService,
   type BottleProductStore,
   type ConsumableProductStore,
   type BottleBalance,
   type ConsumableBalance,
+  type DriverVanStock,
 } from '@/api/services/store.service';
 import type { Employee } from '@/types/employee.types';
 import axiosInstance from '@/api/axios.config';
+import { customerAdminService, type AdminCustomer } from '@/api/services/customerAdmin.service';
 import { DriverSaleReceiptModal } from '@/pages/driver/DriverSaleReceiptModal';
 import type { DriverSaleData }    from '@/pages/driver/DriverSaleReceiptModal';
 
@@ -62,29 +68,43 @@ import type { DriverSaleData }    from '@/pages/driver/DriverSaleReceiptModal';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const UNIT_LABEL_MAP: Record<string, string> = {
-  BOTTLES:  'Bottles',
-  LITRES:   'Litres',
-  DOZENS:   'Dozens',
-  PIECES:   'Pieces',
-  CRATES:   'Crates',
-  JERRICANS:'Jerricans',
-  SACHETS:  'Sachets',
-  GALLONS:  'Gallons',
-  PACKS:    'Packs',
-  CARTONS:  'Cartons',
+  BOTTLES:   'Bottles',
+  LITRES:    'Litres',
+  DOZENS:    'Dozens',
+  PIECES:    'Pieces',
+  CRATES:    'Crates',
+  JERRICANS: 'Jerricans',
+  SACHETS:   'Sachets',
+  GALLONS:   'Gallons',
+  PACKS:     'Packs',
+  CARTONS:   'Cartons',
 };
 
 const UNIT_COLOR_MAP: Record<string, string> = {
-  BOTTLES:  'text-violet-500 bg-violet-500/10',
-  LITRES:   'text-sky-500 bg-sky-500/10',
-  DOZENS:   'text-amber-500 bg-amber-500/10',
-  PIECES:   'text-emerald-500 bg-emerald-500/10',
-  CRATES:   'text-orange-500 bg-orange-500/10',
-  JERRICANS:'text-cyan-500 bg-cyan-500/10',
-  SACHETS:  'text-pink-500 bg-pink-500/10',
-  GALLONS:  'text-blue-500 bg-blue-500/10',
-  PACKS:    'text-indigo-500 bg-indigo-500/10',
-  CARTONS:  'text-rose-500 bg-rose-500/10',
+  BOTTLES:   'text-violet-500 bg-violet-500/10',
+  LITRES:    'text-sky-500 bg-sky-500/10',
+  DOZENS:    'text-amber-500 bg-amber-500/10',
+  PIECES:    'text-emerald-500 bg-emerald-500/10',
+  CRATES:    'text-orange-500 bg-orange-500/10',
+  JERRICANS: 'text-cyan-500 bg-cyan-500/10',
+  SACHETS:   'text-pink-500 bg-pink-500/10',
+  GALLONS:   'text-blue-500 bg-blue-500/10',
+  PACKS:     'text-indigo-500 bg-indigo-500/10',
+  CARTONS:   'text-rose-500 bg-rose-500/10',
+};
+
+// Driver van stock unit colors (slightly stronger for card context)
+const DRIVER_UNIT_COLOR: Record<string, string> = {
+  BOTTLES:   'text-violet-600 bg-violet-500/10',
+  LITRES:    'text-sky-600   bg-sky-500/10',
+  DOZENS:    'text-amber-600 bg-amber-500/10',
+  PIECES:    'text-emerald-600 bg-emerald-500/10',
+  CRATES:    'text-orange-600 bg-orange-500/10',
+  JERRICANS: 'text-cyan-600  bg-cyan-500/10',
+  SACHETS:   'text-pink-600  bg-pink-500/10',
+  GALLONS:   'text-blue-600  bg-blue-500/10',
+  PACKS:     'text-indigo-600 bg-indigo-500/10',
+  CARTONS:   'text-rose-600  bg-rose-500/10',
 };
 
 function getUnitLabel(unit?: string) {
@@ -93,15 +113,18 @@ function getUnitLabel(unit?: string) {
 function getUnitColor(unit?: string) {
   return UNIT_COLOR_MAP[unit ?? ''] ?? 'text-muted-foreground bg-muted';
 }
+function getDriverUnitColor(unit?: string) {
+  return DRIVER_UNIT_COLOR[unit ?? ''] ?? 'text-muted-foreground bg-muted';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRODUCT DROPDOWN ITEM — shared across all dialogs
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ProductDropdownItemProps {
-  name:        string;
-  unit?:       string;
-  imageUrl?:   string | null;
+  name:          string;
+  unit?:         string;
+  imageUrl?:     string | null;
   stockLabel?:   string;
   stockVariant?: 'ok' | 'low' | 'out';
 }
@@ -183,9 +206,9 @@ async function fetchDrivers(): Promise<Employee[]> {
     type Resp = { data: RawEmployee[] } | { results: RawEmployee[] } | RawEmployee[];
     const r = await axiosInstance.get<Resp>('/auth/employees/', { params: { role: 'driver', limit: 100 } });
     const raw: RawEmployee[] =
-      Array.isArray(r.data)                                 ? r.data :
-      'data'    in r.data && Array.isArray(r.data.data)     ? r.data.data :
-      'results' in r.data && Array.isArray(r.data.results)  ? r.data.results :
+      Array.isArray(r.data)                                ? r.data :
+      'data'    in r.data && Array.isArray(r.data.data)    ? r.data.data :
+      'results' in r.data && Array.isArray(r.data.results) ? r.data.results :
       [];
     return raw.map(mapEmployee);
   } catch {
@@ -482,7 +505,7 @@ interface ProductDrawerProps {
 }
 
 const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, onAction }) => {
-  const [dtf, setDtf]           = useState<DateTimeFilter>(emptyDTF);
+  const [dtf, setDtf]               = useState<DateTimeFilter>(emptyDTF);
   const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => { if (product) setDtf(emptyDTF); }, [product]);
@@ -657,7 +680,7 @@ const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, onActio
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOOLBAR
+// TOOLBAR (Bottles / Consumables tabs)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ViewMode  = 'grid' | 'list';
@@ -904,7 +927,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GRID CARDS
+// GRID CARDS (Bottles / Consumables)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BottleGridCard: React.FC<{
@@ -1034,12 +1057,12 @@ const BottleListRow: React.FC<{
   p: BottleProductStore & { product_image?: string | null };
   expanded: boolean; onToggle: () => void; onAction: (type: string) => void;
 }> = ({ p, expanded, onToggle, onAction }) => {
-  const [dtf, setDtf]   = useState<DateTimeFilter>(emptyDTF);
+  const [dtf, setDtf]       = useState<DateTimeFilter>(emptyDTF);
   const [showDT, setShowDT] = useState(false);
-  const history    = p.history as HistoryItem[];
-  const times      = availableTimes(history);
-  const filtered   = history.filter(i => passesDateTimeFilter(i, dtf));
-  const grouped    = groupByDate(filtered);
+  const history     = p.history as HistoryItem[];
+  const times       = availableTimes(history);
+  const filtered    = history.filter(i => passesDateTimeFilter(i, dtf));
+  const grouped     = groupByDate(filtered);
   const stockStatus = p.balance.full <= 0 ? 'out' : p.balance.full <= 5 ? 'low' : 'ok';
 
   return (
@@ -1131,12 +1154,12 @@ const ConsumableListRow: React.FC<{
   p: ConsumableProductStore & { product_image?: string | null };
   expanded: boolean; onToggle: () => void; onAction: (type: string) => void;
 }> = ({ p, expanded, onToggle, onAction }) => {
-  const [dtf, setDtf]   = useState<DateTimeFilter>(emptyDTF);
+  const [dtf, setDtf]       = useState<DateTimeFilter>(emptyDTF);
   const [showDT, setShowDT] = useState(false);
-  const history    = p.history as HistoryItem[];
-  const times      = availableTimes(history);
-  const filtered   = history.filter(i => passesDateTimeFilter(i, dtf));
-  const grouped    = groupByDate(filtered);
+  const history     = p.history as HistoryItem[];
+  const times       = availableTimes(history);
+  const filtered    = history.filter(i => passesDateTimeFilter(i, dtf));
+  const grouped     = groupByDate(filtered);
   const stockStatus = p.balance.in_stock <= 0 ? 'out' : p.balance.in_stock <= 10 ? 'low' : 'ok';
 
   return (
@@ -1215,6 +1238,707 @@ const ConsumableListRow: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DRIVER VAN STOCK — ENHANCED TAB
+// ─────────────────────────────────────────────────────────────────────────────
+
+type DriverStockStatus = 'ok' | 'low' | 'empty';
+type DVViewMode        = 'grid' | 'list' | 'compact';
+type DVSortKey         = 'name' | 'total_desc' | 'total_asc' | 'bottles_desc' | 'consumables_desc';
+type DVFilterMode      = 'all' | 'stocked' | 'low' | 'empty';
+type DVGroupMode       = 'none' | 'status';
+
+function driverStockStatus(d: DriverVanStock): DriverStockStatus {
+  if (d.total_items <= 0) return 'empty';
+  if (d.total_items <= 5) return 'low';
+  return 'ok';
+}
+
+function dvBottlesFull(d: DriverVanStock) {
+  return d.bottles.reduce((s, b) => s + b.balance.full, 0);
+}
+function dvConsTotal(d: DriverVanStock) {
+  return d.consumables.reduce((s, c) => s + c.balance.in_stock, 0);
+}
+
+// Avatar with name-derived colour
+const AVATAR_PALETTES = [
+  'bg-violet-500/15 text-violet-700 border-violet-300/40 dark:text-violet-300 dark:border-violet-700/40',
+  'bg-sky-500/15    text-sky-700    border-sky-300/40    dark:text-sky-300    dark:border-sky-700/40',
+  'bg-emerald-500/15 text-emerald-700 border-emerald-300/40 dark:text-emerald-300 dark:border-emerald-700/40',
+  'bg-amber-500/15  text-amber-700  border-amber-300/40  dark:text-amber-300  dark:border-amber-700/40',
+  'bg-rose-500/15   text-rose-700   border-rose-300/40   dark:text-rose-300   dark:border-rose-700/40',
+  'bg-indigo-500/15 text-indigo-700 border-indigo-300/40 dark:text-indigo-300 dark:border-indigo-700/40',
+];
+
+function dvAvatarPalette(name: string) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return AVATAR_PALETTES[h % AVATAR_PALETTES.length];
+}
+
+function dvInitials(name: string) {
+  return name.split(' ').slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase();
+}
+
+const DriverAvatar: React.FC<{ name: string; size?: 'sm' | 'md' }> = ({ name, size = 'md' }) => {
+  const dims = size === 'sm' ? 'h-8 w-8 text-xs' : 'h-10 w-10 text-sm';
+  return (
+    <div className={cn(
+      'flex items-center justify-center rounded-full border font-semibold shrink-0 select-none',
+      dims, dvAvatarPalette(name),
+    )}>
+      {dvInitials(name) || <User className="h-4 w-4" />}
+    </div>
+  );
+};
+
+const DVStockBar: React.FC<{ value: number; status: DriverStockStatus }> = ({ value, status }) => (
+  <div className="h-1.5 rounded-full bg-muted overflow-hidden w-full">
+    <div
+      className={cn(
+        'h-full rounded-full transition-all duration-500',
+        status === 'empty' ? 'w-0' : status === 'low' ? 'bg-amber-500' : 'bg-emerald-500',
+      )}
+      style={{ width: status === 'empty' ? '0%' : `${Math.min(100, (value / 30) * 100)}%` }}
+    />
+  </div>
+);
+
+// ── Driver Grid Card ───────────────────────────────────────────────────────────
+
+const DriverGridCard: React.FC<{ driver: DriverVanStock }> = ({ driver }) => {
+  const [expanded, setExpanded] = useState(false);
+  const status        = driverStockStatus(driver);
+  const hasBottles    = driver.bottles.length > 0;
+  const hasConsumables = driver.consumables.length > 0;
+
+  return (
+    <Card className={cn(
+      'border-border/50 overflow-hidden transition-all duration-200',
+      status === 'empty' && 'border-destructive/20',
+      status === 'low'   && 'border-amber-500/20',
+    )}>
+      <CardContent className="p-0">
+        <div className="px-4 pt-4 pb-3">
+          <div className="flex items-start gap-3">
+            <DriverAvatar name={driver.driver_name} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-sm truncate">{driver.driver_name}</p>
+                <Badge
+                  variant={status === 'empty' ? 'destructive' : status === 'low' ? 'warning' : 'secondary'}
+                  className="text-[10px] tabular-nums shrink-0 py-0 h-4"
+                >
+                  {driver.total_items} item{driver.total_items !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+              {driver.vehicle_number ? (
+                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <Truck className="h-3 w-3 shrink-0" />{driver.vehicle_number}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground/50 mt-0.5 italic">No vehicle</p>
+              )}
+            </div>
+          </div>
+
+          {/* Stock bar */}
+          <div className="mt-3 space-y-1">
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>{driver.bottles.length} bottle type{driver.bottles.length !== 1 ? 's' : ''}</span>
+              <span>{driver.consumables.length} consumable{driver.consumables.length !== 1 ? 's' : ''}</span>
+            </div>
+            <DVStockBar value={driver.total_items} status={status} />
+          </div>
+
+          {/* Product pills */}
+          {driver.total_items > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {driver.bottles.slice(0, 3).map(b => (
+                <div key={b.product_id} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/8 border border-blue-200/50 dark:border-blue-800/30">
+                  <Droplets className="h-2.5 w-2.5 text-blue-500 shrink-0" />
+                  <span className="text-[10px] font-medium text-blue-700 dark:text-blue-300 max-w-20 truncate">{b.product_name}</span>
+                  <span className="text-[10px] font-bold text-emerald-600 tabular-nums">{b.balance.full}</span>
+                </div>
+              ))}
+              {driver.consumables.slice(0, 2).map(c => (
+                <div key={c.product_id} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/8 border border-sky-200/50 dark:border-sky-800/30">
+                  <Package className="h-2.5 w-2.5 text-sky-500 shrink-0" />
+                  <span className="text-[10px] font-medium text-sky-700 dark:text-sky-300 max-w-20 truncate">{c.product_name}</span>
+                  <span className="text-[10px] font-bold text-sky-600 tabular-nums">{c.balance.in_stock}</span>
+                </div>
+              ))}
+              {(driver.bottles.length + driver.consumables.length > 5) && (
+                <div className="flex items-center px-2 py-0.5 rounded-full bg-muted text-[10px] text-muted-foreground">
+                  +{driver.bottles.length + driver.consumables.length - 5} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {driver.total_items === 0 && (
+            <div className="mt-3 rounded-lg border border-dashed py-2 text-center text-xs text-muted-foreground/60">
+              No stock on van
+            </div>
+          )}
+        </div>
+
+        {/* Expand toggle */}
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center justify-between w-full px-4 py-2 border-t border-border/40 hover:bg-muted/30 transition-colors text-xs text-muted-foreground hover:text-foreground"
+        >
+          <span>{expanded ? 'Hide breakdown' : 'Show breakdown'}</span>
+          <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} />
+        </button>
+
+        {/* Expanded breakdown */}
+        {expanded && (
+          <div className="border-t border-border/30 bg-muted/10 px-4 py-3 space-y-3">
+            {hasBottles && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <Droplets className="h-3 w-3" /> Returnable Bottles
+                </p>
+                <div className="space-y-2">
+                  {driver.bottles.map(b => (
+                    <div key={b.product_id} className="rounded-xl border border-border/50 bg-card px-3 py-2.5">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-medium truncate flex-1 mr-2">{b.product_name}</p>
+                        {b.selling_price && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">
+                            KES {parseFloat(b.selling_price).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { label: 'Full',    value: b.balance.full,    color: 'text-emerald-600', bg: 'bg-emerald-500/8'  },
+                          { label: 'Empty',   value: b.balance.empty,   color: 'text-amber-600',   bg: 'bg-amber-500/8'    },
+                          { label: 'Damaged', value: b.balance.damaged, color: 'text-orange-600',  bg: 'bg-orange-500/8'   },
+                          { label: 'Missing', value: b.balance.missing, color: 'text-destructive', bg: 'bg-destructive/5'  },
+                        ].map(s => (
+                          <div key={s.label} className={cn('rounded-lg px-1 py-1.5 text-center', s.bg)}>
+                            <p className={cn('text-xs font-bold tabular-nums', s.color)}>{s.value}</p>
+                            <p className="text-[9px] text-muted-foreground mt-0.5">{s.label}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {hasConsumables && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <Package className="h-3 w-3" /> Consumables
+                </p>
+                <div className="space-y-1.5">
+                  {driver.consumables.map(c => (
+                    <div key={c.product_id} className="flex items-center gap-3 rounded-xl border border-border/50 bg-card px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{c.product_name}</p>
+                        {c.unit && (
+                          <span className={cn('inline-flex text-[9px] font-semibold px-1.5 py-0 rounded-full mt-0.5', getDriverUnitColor(c.unit))}>
+                            {getUnitLabel(c.unit)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold tabular-nums text-sky-600">{c.balance.in_stock}</p>
+                        {c.selling_price && (
+                          <p className="text-[9px] text-muted-foreground">KES {parseFloat(c.selling_price).toLocaleString()}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!hasBottles && !hasConsumables && (
+              <p className="text-xs text-muted-foreground text-center py-2">No stock details available.</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// ── Driver List Row ────────────────────────────────────────────────────────────
+
+const DriverListRow: React.FC<{ driver: DriverVanStock }> = ({ driver }) => {
+  const [expanded, setExpanded] = useState(false);
+  const status        = driverStockStatus(driver);
+  const totalFull     = dvBottlesFull(driver);
+  const totalCons     = dvConsTotal(driver);
+
+  return (
+    <Card className={cn(
+      'border-border/50 overflow-hidden',
+      status === 'empty' && 'border-destructive/20',
+      status === 'low'   && 'border-amber-500/20',
+    )}>
+      <div
+        role="button"
+        tabIndex={0}
+        className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors cursor-pointer"
+        onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setExpanded(v => !v)}
+      >
+        <DriverAvatar name={driver.driver_name} size="sm" />
+
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-sm truncate">{driver.driver_name}</p>
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Truck className="h-3 w-3 shrink-0" />
+            {driver.vehicle_number || 'No vehicle'}
+          </p>
+        </div>
+
+        <div className="hidden sm:flex items-center gap-4 text-xs shrink-0">
+          <div className="text-center">
+            <p className="font-bold text-blue-600 tabular-nums">{totalFull}</p>
+            <p className="text-muted-foreground text-[10px]">Bottles</p>
+          </div>
+          <div className="text-center">
+            <p className="font-bold text-sky-600 tabular-nums">{totalCons}</p>
+            <p className="text-muted-foreground text-[10px]">Units</p>
+          </div>
+          <div className="text-center">
+            <p className={cn('font-bold tabular-nums', status === 'empty' ? 'text-destructive' : status === 'low' ? 'text-amber-600' : 'text-emerald-600')}>{driver.total_items}</p>
+            <p className="text-muted-foreground text-[10px]">Total</p>
+          </div>
+        </div>
+
+        <Badge
+          variant={status === 'empty' ? 'destructive' : status === 'low' ? 'warning' : 'secondary'}
+          className="text-[10px] shrink-0 sm:hidden py-0 h-4"
+        >
+          {driver.total_items}
+        </Badge>
+
+        <ChevronDown className={cn('h-4 w-4 text-muted-foreground shrink-0 transition-transform', expanded && 'rotate-180')} />
+      </div>
+
+      {expanded && (
+        <div className="border-t border-border/40 px-4 py-3 bg-muted/10">
+          {(driver.bottles.length > 0 || driver.consumables.length > 0) ? (
+            <div className="space-y-3">
+              {driver.bottles.map(b => (
+                <div key={b.product_id} className="rounded-xl border border-border/50 bg-card px-3 py-2.5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Droplets className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    <p className="text-xs font-medium truncate flex-1">{b.product_name}</p>
+                    {b.selling_price && <span className="text-[10px] text-muted-foreground">KES {parseFloat(b.selling_price).toLocaleString()}</span>}
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { l: 'Full',    v: b.balance.full,    c: 'text-emerald-600', bg: 'bg-emerald-500/8'  },
+                      { l: 'Empty',   v: b.balance.empty,   c: 'text-amber-600',   bg: 'bg-amber-500/8'    },
+                      { l: 'Damaged', v: b.balance.damaged, c: 'text-orange-600',  bg: 'bg-orange-500/8'   },
+                      { l: 'Missing', v: b.balance.missing, c: 'text-destructive', bg: 'bg-destructive/5'  },
+                    ].map(s => (
+                      <div key={s.l} className={cn('rounded-lg px-2 py-1.5 text-center', s.bg)}>
+                        <p className={cn('text-xs font-bold tabular-nums', s.c)}>{s.v}</p>
+                        <p className="text-[9px] text-muted-foreground">{s.l}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {driver.consumables.map(c => (
+                <div key={c.product_id} className="flex items-center gap-3 rounded-xl border border-border/50 bg-card px-3 py-2.5">
+                  <Package className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{c.product_name}</p>
+                    {c.unit && (
+                      <span className={cn('inline-flex text-[9px] font-semibold px-1.5 py-0 rounded-full mt-0.5', getDriverUnitColor(c.unit))}>
+                        {getUnitLabel(c.unit)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-bold tabular-nums text-sky-600 shrink-0">{c.balance.in_stock}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-4">Van is empty.</p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// ── Driver Compact Row ─────────────────────────────────────────────────────────
+
+const DriverCompactRow: React.FC<{ driver: DriverVanStock }> = ({ driver }) => {
+  const [expanded, setExpanded] = useState(false);
+  const status    = driverStockStatus(driver);
+  const totalFull = dvBottlesFull(driver);
+  const totalCons = dvConsTotal(driver);
+
+  return (
+    <div>
+      <div
+        role="button"
+        tabIndex={0}
+        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/30 transition-colors cursor-pointer"
+        onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setExpanded(v => !v)}
+      >
+        <DriverAvatar name={driver.driver_name} size="sm" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{driver.driver_name}</p>
+          <p className="text-[10px] text-muted-foreground truncate">{driver.vehicle_number || '—'}</p>
+        </div>
+        <div className="flex items-center gap-3 text-xs shrink-0">
+          <span className="flex items-center gap-1 text-blue-600"><Droplets className="h-3 w-3" />{totalFull}</span>
+          <span className="flex items-center gap-1 text-sky-600"><Package className="h-3 w-3" />{totalCons}</span>
+          <span className={cn('font-bold tabular-nums w-6 text-right', status === 'empty' ? 'text-destructive' : status === 'low' ? 'text-amber-600' : 'text-emerald-600')}>{driver.total_items}</span>
+        </div>
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ml-1', expanded && 'rotate-180')} />
+      </div>
+
+      {expanded && (
+        <div className="ml-10 pl-3 border-l border-border/40 mb-2 space-y-1.5">
+          {driver.bottles.map(b => (
+            <div key={b.product_id} className="flex items-center gap-2 text-xs py-0.5">
+              <Droplets className="h-3 w-3 text-blue-400 shrink-0" />
+              <span className="flex-1 truncate text-muted-foreground">{b.product_name}</span>
+              <span className="text-emerald-600 tabular-nums">{b.balance.full}f</span>
+              {b.balance.empty   > 0 && <span className="text-amber-600 tabular-nums">{b.balance.empty}e</span>}
+              {b.balance.damaged > 0 && <span className="text-orange-600 tabular-nums">{b.balance.damaged}d</span>}
+            </div>
+          ))}
+          {driver.consumables.map(c => (
+            <div key={c.product_id} className="flex items-center gap-2 text-xs py-0.5">
+              <Package className="h-3 w-3 text-sky-400 shrink-0" />
+              <span className="flex-1 truncate text-muted-foreground">{c.product_name}</span>
+              <span className="text-sky-600 tabular-nums">{c.balance.in_stock}</span>
+            </div>
+          ))}
+          {driver.bottles.length === 0 && driver.consumables.length === 0 && (
+            <p className="text-[10px] text-muted-foreground/60 py-1">Empty van</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Summary Stats ──────────────────────────────────────────────────────────────
+
+const DVSummaryStats: React.FC<{ drivers: DriverVanStock[] }> = ({ drivers }) => {
+  const totalDrivers     = drivers.length;
+  const activeDrivers    = drivers.filter(d => d.total_items > 0).length;
+  const totalBottles     = drivers.reduce((s, d) => s + dvBottlesFull(d), 0);
+  const totalConsumables = drivers.reduce((s, d) => s + dvConsTotal(d), 0);
+  const emptyDrivers     = drivers.filter(d => d.total_items <= 0).length;
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {[
+        { label: 'Active drivers',  value: `${activeDrivers}/${totalDrivers}`, icon: <Users    className="h-3.5 w-3.5" />, color: 'text-violet-600', bg: 'bg-violet-500/10' },
+        { label: 'Bottles on vans', value: totalBottles,                        icon: <Droplets className="h-3.5 w-3.5" />, color: 'text-blue-600',   bg: 'bg-blue-500/10'   },
+        { label: 'Units on vans',   value: totalConsumables,                    icon: <Package  className="h-3.5 w-3.5" />, color: 'text-sky-600',    bg: 'bg-sky-500/10'    },
+        { label: 'Empty vans',      value: emptyDrivers,                        icon: <Truck    className="h-3.5 w-3.5" />, color: 'text-amber-600',  bg: 'bg-amber-500/10'  },
+      ].map(s => (
+        <div key={s.label} className="rounded-xl border border-border/50 bg-card px-3 py-2.5 flex items-center gap-2.5">
+          <div className={cn('flex items-center justify-center h-7 w-7 rounded-lg shrink-0', s.bg, s.color)}>
+            {s.icon}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground leading-tight">{s.label}</p>
+            <p className={cn('text-lg font-bold tabular-nums leading-tight', s.color)}>{s.value}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ── Driver Van Stock Tab (enhanced) ───────────────────────────────────────────
+
+const DriverVanStockTab: React.FC<{
+  drivers:   DriverVanStock[];
+  search:    string;
+  onSearch:  (v: string) => void;
+  onRefresh: () => void;
+}> = ({ drivers, search, onSearch, onRefresh }) => {
+  const [viewMode,   setViewMode]   = useState<DVViewMode>('grid');
+  const [sortKey,    setSortKey]    = useState<DVSortKey>('name');
+  const [filterMode, setFilterMode] = useState<DVFilterMode>('all');
+  const [groupMode,  setGroupMode]  = useState<DVGroupMode>('none');
+
+  const clearAll = useCallback(() => {
+    onSearch(''); setSortKey('name'); setFilterMode('all'); setGroupMode('none');
+  }, [onSearch]);
+
+  const hasFilters = !!(search || sortKey !== 'name' || filterMode !== 'all' || groupMode !== 'none');
+
+  const processed = useMemo(() => {
+    let result = [...drivers];
+
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(d =>
+        d.driver_name.toLowerCase().includes(q) ||
+        d.vehicle_number.toLowerCase().includes(q),
+      );
+    }
+
+    if (filterMode !== 'all') {
+      result = result.filter(d => {
+        const s = driverStockStatus(d);
+        if (filterMode === 'stocked') return s === 'ok';
+        if (filterMode === 'low')     return s === 'low';
+        if (filterMode === 'empty')   return s === 'empty';
+        return true;
+      });
+    }
+
+    result.sort((a, b) => {
+      switch (sortKey) {
+        case 'name':             return a.driver_name.localeCompare(b.driver_name);
+        case 'total_desc':       return b.total_items - a.total_items;
+        case 'total_asc':        return a.total_items - b.total_items;
+        case 'bottles_desc':     return dvBottlesFull(b) - dvBottlesFull(a);
+        case 'consumables_desc': return dvConsTotal(b) - dvConsTotal(a);
+        default: return 0;
+      }
+    });
+
+    return result;
+  }, [drivers, search, sortKey, filterMode]);
+
+  const grouped = useMemo(() => {
+    if (groupMode === 'none') return { '': processed };
+    const g: Record<string, DriverVanStock[]> = {
+      'In stock':   [],
+      'Low stock':  [],
+      'Empty vans': [],
+    };
+    processed.forEach(d => {
+      const s = driverStockStatus(d);
+      if (s === 'ok')    g['In stock'].push(d);
+      else if (s === 'low') g['Low stock'].push(d);
+      else g['Empty vans'].push(d);
+    });
+    return Object.fromEntries(Object.entries(g).filter(([, v]) => v.length > 0));
+  }, [processed, groupMode]);
+
+  const DVGroupLabel: React.FC<{ label: string; count: number }> = ({ label, count }) => {
+    const icon =
+      label === 'In stock'   ? <TrendingUp   className="h-3.5 w-3.5 text-emerald-600" /> :
+      label === 'Low stock'  ? <TrendingDown className="h-3.5 w-3.5 text-amber-600"  /> :
+                               <Minus        className="h-3.5 w-3.5 text-destructive" />;
+    return (
+      <div className="flex items-center gap-2 py-1.5">
+        {icon}
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{label}</span>
+        <div className="flex-1 h-px bg-border/50" />
+        <Badge variant="secondary" className="text-[10px] py-0 h-4 tabular-nums">{count}</Badge>
+      </div>
+    );
+  };
+
+  const renderDrivers = (list: DriverVanStock[]) => {
+    if (viewMode === 'grid') {
+      return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {list.map(d => <DriverGridCard key={d.driver_id} driver={d} />)}
+        </div>
+      );
+    }
+    if (viewMode === 'list') {
+      return (
+        <div className="space-y-2">
+          {list.map(d => <DriverListRow key={d.driver_id} driver={d} />)}
+        </div>
+      );
+    }
+    // compact
+    return (
+      <Card className="border-border/50 divide-y divide-border/30 overflow-hidden">
+        <div className="flex items-center gap-2.5 px-3 py-1.5 bg-muted/30">
+          <div className="w-8 shrink-0" />
+          <span className="flex-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Driver</span>
+          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"><Droplets className="h-3 w-3" />Bottles</span>
+          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-3"><Package className="h-3 w-3" />Units</span>
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-3 w-6 text-right">Total</span>
+          <div className="w-5 shrink-0" />
+        </div>
+        {list.map(d => <DriverCompactRow key={d.driver_id} driver={d} />)}
+      </Card>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary stats */}
+      {drivers.length > 0 && <DVSummaryStats drivers={drivers} />}
+
+      {/* Toolbar */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        {/* Row 1: search + view + refresh */}
+        <div className="flex gap-2 px-3 pt-3 pb-2.5 border-b border-border/40">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search by driver or vehicle…"
+              value={search}
+              onChange={e => onSearch(e.target.value)}
+              className="pl-8 h-9 text-sm bg-transparent"
+            />
+            {search && (
+              <button onClick={() => onSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* View toggle: grid / list / compact */}
+          <div className="flex items-center rounded-lg border border-border/60 p-0.5 bg-muted/30 shrink-0">
+            {([
+              { mode: 'grid'    as DVViewMode, icon: <LayoutGrid   className="h-3.5 w-3.5" />, label: 'Grid'    },
+              { mode: 'list'    as DVViewMode, icon: <List         className="h-3.5 w-3.5" />, label: 'List'    },
+              { mode: 'compact' as DVViewMode, icon: <AlignJustify className="h-3.5 w-3.5" />, label: 'Compact' },
+            ]).map(v => (
+              <button
+                key={v.mode}
+                onClick={() => setViewMode(v.mode)}
+                title={v.label}
+                className={cn(
+                  'flex items-center justify-center h-7 w-7 rounded-md transition-colors',
+                  viewMode === v.mode ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >{v.icon}</button>
+            ))}
+          </div>
+
+          <Button variant="ghost" size="icon" onClick={onRefresh} className="h-9 w-9 shrink-0">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Row 2: sort · group · filter chips · count */}
+        <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
+          {/* Sort */}
+          <Select value={sortKey} onValueChange={v => setSortKey(v as DVSortKey)}>
+            <SelectTrigger className="h-8 text-xs w-auto min-w-0 gap-1 border-dashed pl-2 pr-2.5">
+              <ArrowUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name A–Z</SelectItem>
+              <SelectItem value="total_desc">Total stock ↓</SelectItem>
+              <SelectItem value="total_asc">Total stock ↑</SelectItem>
+              <SelectItem value="bottles_desc">Most bottles</SelectItem>
+              <SelectItem value="consumables_desc">Most units</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="h-4 w-px bg-border/60 shrink-0" />
+
+          {/* Group by status toggle */}
+          <button
+            onClick={() => setGroupMode(g => g === 'none' ? 'status' : 'none')}
+            className={cn(
+              'flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors',
+              groupMode !== 'none'
+                ? 'border-primary/40 bg-primary/5 text-primary'
+                : 'border-dashed text-muted-foreground hover:text-foreground hover:border-border',
+            )}
+          >
+            <Layers className="h-3 w-3" />
+            {groupMode !== 'none' ? 'Grouped by status' : 'Group by…'}
+          </button>
+
+          <div className="h-4 w-px bg-border/60 shrink-0" />
+
+          {/* Filter chips */}
+          <div className="flex items-center rounded-lg border border-border/50 bg-muted/20 p-0.5 gap-0.5">
+            {([
+              { val: 'all',     label: 'All'     },
+              { val: 'stocked', label: 'Stocked' },
+              { val: 'low',     label: 'Low'     },
+              { val: 'empty',   label: 'Empty'   },
+            ] as const).map(f => (
+              <button
+                key={f.val}
+                onClick={() => setFilterMode(f.val)}
+                className={cn(
+                  'text-xs px-2.5 py-1 rounded-md transition-colors font-medium',
+                  filterMode === f.val
+                    ? f.val === 'empty'   ? 'bg-destructive/10 text-destructive shadow-sm'
+                    : f.val === 'low'     ? 'bg-amber-500/10 text-amber-700 shadow-sm'
+                    : f.val === 'stocked' ? 'bg-emerald-500/10 text-emerald-700 shadow-sm'
+                    : 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >{f.label}</button>
+            ))}
+          </div>
+
+          {/* Count + clear */}
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {processed.length} driver{processed.length !== 1 ? 's' : ''}
+            </span>
+            {hasFilters && (
+              <button
+                onClick={clearAll}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3 w-3" /> Clear
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Empty states */}
+      {drivers.length === 0 && (
+        <Card className="border-dashed border-2">
+          <CardContent className="flex flex-col items-center justify-center py-16 gap-3">
+            <Users className="h-10 w-10 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">No driver van stock found.</p>
+            <p className="text-xs text-muted-foreground/70">Stock must be distributed to a driver's van first.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {drivers.length > 0 && processed.length === 0 && (
+        <Card className="border-dashed border-2">
+          <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+            <SlidersHorizontal className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No drivers match your filters.</p>
+            <button onClick={clearAll} className="text-xs text-primary hover:underline">Clear all filters</button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Content */}
+      {processed.length > 0 && (
+        <div className="space-y-4">
+          {Object.entries(grouped).map(([label, list]) => (
+            <div key={label} className="space-y-3">
+              {groupMode !== 'none' && label && <DVGroupLabel label={label} count={list.length} />}
+              {renderDrivers(list)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OPERATION DIALOGS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1222,8 +1946,8 @@ type BottleDialog     = 'receive' | 'refill' | 'distribute' | 'sale' | null;
 type ConsumableDialog = 'receive' | 'distribute' | 'sale' | null;
 
 const ProductSelectTrigger: React.FC<{
-  selectedId: string;
-  products:   Array<{ id: string; name: string; unit?: string; imageUrl?: string | null }>;
+  selectedId:   string;
+  products:     Array<{ id: string; name: string; unit?: string; imageUrl?: string | null }>;
   placeholder?: string;
 }> = ({ selectedId, products, placeholder = 'Select product…' }) => {
   const selected = products.find(p => p.id === selectedId);
@@ -1321,6 +2045,7 @@ const ReasonPicker: React.FC<{
     ))}
   </div>
 );
+
 // ── Receive Empties ───────────────────────────────────────────────────────────
 
 const ReceiveEmptiesDialog: React.FC<{
@@ -1345,7 +2070,6 @@ const ReceiveEmptiesDialog: React.FC<{
   const [loadedDrivers, setLoadedDrivers] = useState<Set<string>>(new Set());
   const [result,        setResult]        = useState<ReceiveResult | null>(null);
 
-  // Reset everything when dialog opens
   useEffect(() => {
     if (open) {
       setProductId(''); setDriverId('');
@@ -1369,10 +2093,9 @@ const ReceiveEmptiesDialog: React.FC<{
       });
       setExpectedMap(prev => ({ ...prev, ...map }));
     } catch {
-      // non-fatal — we still mark as loaded so spinner stops
+      // non-fatal
     } finally {
       setFetchingExp(false);
-      // ✅ Always mark driver as loaded, even if response had no records
       setLoadedDrivers(prev => new Set(prev).add(dId));
     }
   }, []);
@@ -1388,15 +2111,11 @@ const ReceiveEmptiesDialog: React.FC<{
     setShortReason(''); setOverReason('');
   };
 
-  // ── Derived numbers ──────────────────────────────────────────────────────
   const driverLoaded = loadedDrivers.has(driverId);
 
-  // null  = still loading (driver selected but fetch not done yet)
-  // 0     = loaded, no outstanding empties
-  // n > 0 = loaded, n empties expected
   const systemExpected: number | null =
-    !driverId || !productId   ? null :
-    fetchingExp || !driverLoaded ? null :
+    !driverId || !productId        ? null :
+    fetchingExp || !driverLoaded   ? null :
     (expectedMap[`${driverId}::${productId}`] ?? 0);
 
   const good     = parseInt(qtyGood)    || 0;
@@ -1408,8 +2127,8 @@ const ReceiveEmptiesDialog: React.FC<{
   const progressPct  = hasExpected ? Math.min(100, (received / systemExpected) * 100) : 0;
 
   const compareState: CompareState =
-    !qtyGood && !qtyDamaged ? 'empty' :
-    !hasExpected            ? 'exact' :   // no tracking → just accept
+    !qtyGood && !qtyDamaged     ? 'empty' :
+    !hasExpected                ? 'exact' :
     received === systemExpected ? 'exact' :
     received  <  systemExpected ? 'short' :
                                   'over';
@@ -1463,7 +2182,6 @@ const ReceiveEmptiesDialog: React.FC<{
       }
 
       setTimeout(() => onClose(), 2200);
-
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
         ?? 'Failed to record receive.';
@@ -1473,12 +2191,10 @@ const ReceiveEmptiesDialog: React.FC<{
     }
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
 
-        {/* Header */}
         <div className="bg-gradient-to-br from-blue-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-5 border-b border-border/60">
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-blue-500/10 text-blue-600 border border-blue-500/20">
@@ -1486,14 +2202,11 @@ const ReceiveEmptiesDialog: React.FC<{
             </div>
             <div>
               <DialogTitle className="text-base font-semibold">Receive Empties</DialogTitle>
-              <DialogDescription className="text-xs mt-0">
-                Driver returning empty bottles to store
-              </DialogDescription>
+              <DialogDescription className="text-xs mt-0">Driver returning empty bottles to store</DialogDescription>
             </div>
           </div>
         </div>
 
-        {/* Result banner — shown after successful submit */}
         {result && (
           <div className={cn(
             'rounded-2xl border-2 px-4 py-4 mb-4 flex items-start gap-3',
@@ -1506,16 +2219,10 @@ const ReceiveEmptiesDialog: React.FC<{
               : <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
             }
             <div>
-              <p className={cn(
-                'text-sm font-bold',
-                result.cleared
-                  ? 'text-emerald-700 dark:text-emerald-300'
-                  : 'text-amber-700 dark:text-amber-300',
-              )}>
+              <p className={cn('text-sm font-bold', result.cleared ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>
                 {result.cleared
                   ? "✓ Driver's balance cleared — no more empties expected."
-                  : `${result.outstanding_after} empties still outstanding from this driver.`
-                }
+                  : `${result.outstanding_after} empties still outstanding from this driver.`}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Expected {result.expected_before} · received {received}
@@ -1525,38 +2232,26 @@ const ReceiveEmptiesDialog: React.FC<{
         )}
 
         <div className="space-y-4">
-
-          {/* Product */}
           <Field label="Product" required>
             <Select value={productId} onValueChange={handleProductChange}>
               <SelectTrigger className="h-11">
-                <ProductSelectTrigger
-                  selectedId={productId}
-                  products={productOptions}
-                  placeholder="Select bottle product…"
-                />
+                <ProductSelectTrigger selectedId={productId} products={productOptions} placeholder="Select bottle product…" />
               </SelectTrigger>
               <SelectContent className="max-h-64">
                 {productOptions.map(p => (
                   <SelectItem key={p.id} value={p.id} className="py-1.5">
-                    <ProductDropdownItem
-                      name={p.name} unit={p.unit} imageUrl={p.imageUrl}
-                      stockLabel={p.stockLabel} stockVariant={p.stockVariant}
-                    />
+                    <ProductDropdownItem name={p.name} unit={p.unit} imageUrl={p.imageUrl} stockLabel={p.stockLabel} stockVariant={p.stockVariant} />
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </Field>
 
-          {/* Driver */}
           <Field label="Driver" hint="Select driver to auto-load expected count">
             <Select value={driverId} onValueChange={handleDriverChange}>
               <SelectTrigger>
                 <SelectValue placeholder="Select driver…" />
-                {fetchingExp && (
-                  <Loader2 className="h-3 w-3 animate-spin ml-auto text-muted-foreground shrink-0" />
-                )}
+                {fetchingExp && <Loader2 className="h-3 w-3 animate-spin ml-auto text-muted-foreground shrink-0" />}
               </SelectTrigger>
               <SelectContent>
                 {drivers.map(d => (
@@ -1568,50 +2263,35 @@ const ReceiveEmptiesDialog: React.FC<{
             </Select>
           </Field>
 
-          {/* ── Expected count banner ─────────────────────────────────────── */}
           {driverId && productId && !result && (() => {
-            // Still fetching
             if (fetchingExp || !driverLoaded) return (
               <div className="flex items-center gap-2.5 px-3 py-3 rounded-xl bg-muted/30 border border-border/50">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
                 <p className="text-xs text-muted-foreground">Loading expected count from system…</p>
               </div>
             );
-
-            // Loaded — nothing outstanding
             if (systemExpected === 0) return (
               <div className="flex items-center gap-2.5 px-3 py-3 rounded-xl bg-muted/30 border border-border/50">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
                 <div>
                   <p className="text-xs font-semibold text-foreground">No outstanding empties</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    System has no pending empties recorded for this driver.
-                    You can still record a free-form receive below.
+                    System has no pending empties for this driver. You can still record a free-form receive below.
                   </p>
                 </div>
               </div>
             );
-
-            // Loaded — has outstanding
             return (
               <div className="rounded-xl border-2 border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-4 py-3 space-y-2">
-                {/* Target row */}
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                    System expects from this driver
-                  </p>
-                  <span className="text-2xl font-black tabular-nums text-blue-700 dark:text-blue-300">
-                    {systemExpected}
-                  </span>
+                  <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">System expects from this driver</p>
+                  <span className="text-2xl font-black tabular-nums text-blue-700 dark:text-blue-300">{systemExpected}</span>
                 </div>
-
-                {/* Progress bar — only shows once user starts typing */}
                 {received > 0 && (
                   <>
                     <div className="h-3 rounded-full bg-blue-200/60 dark:bg-blue-900/40 overflow-hidden">
                       <div
-                        className={cn(
-                          'h-full rounded-full transition-all duration-300',
+                        className={cn('h-full rounded-full transition-all duration-300',
                           compareState === 'exact' ? 'bg-emerald-500' :
                           compareState === 'short' ? 'bg-amber-500'   :
                           compareState === 'over'  ? 'bg-blue-500'    : 'bg-blue-400',
@@ -1620,24 +2300,19 @@ const ReceiveEmptiesDialog: React.FC<{
                       />
                     </div>
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-blue-600/70 dark:text-blue-400">
-                        {received} of {systemExpected} received
-                      </span>
-                      <span className={cn(
-                        'font-bold',
+                      <span className="text-blue-600/70 dark:text-blue-400">{received} of {systemExpected} received</span>
+                      <span className={cn('font-bold',
                         compareState === 'exact' ? 'text-emerald-600' :
                         compareState === 'short' ? 'text-amber-600'   :
                         compareState === 'over'  ? 'text-blue-600'    : '',
                       )}>
-                        {compareState === 'exact' ? '✓ Exact match'        :
+                        {compareState === 'exact' ? '✓ Exact match' :
                          compareState === 'short' ? `${Math.abs(diff)} short` :
-                         compareState === 'over'  ? `${diff} over`         : ''}
+                         compareState === 'over'  ? `${diff} over` : ''}
                       </span>
                     </div>
                   </>
                 )}
-
-                {/* Hint before user types */}
                 {received === 0 && (
                   <p className="text-[11px] text-blue-600/70 dark:text-blue-400">
                     Enter quantities below — the system will track short or over.
@@ -1647,162 +2322,94 @@ const ReceiveEmptiesDialog: React.FC<{
             );
           })()}
 
-          {/* Good + Damaged inputs */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Good condition" required>
               <Input
-                type="number" min={0} placeholder="0"
-                value={qtyGood}
-                onChange={e => {
-                  setQtyGood(e.target.value);
-                  setShortReason(''); setOverReason('');
-                }}
+                type="number" min={0} placeholder="0" value={qtyGood}
+                onChange={e => { setQtyGood(e.target.value); setShortReason(''); setOverReason(''); }}
                 className={cn(
                   received > 0 && hasExpected && 'border-2',
-                  compareState === 'exact' && received > 0
-                    ? 'border-emerald-400 focus-visible:ring-emerald-400/30' :
-                  compareState === 'short' && received > 0
-                    ? 'border-amber-400 focus-visible:ring-amber-400/30'     :
-                  compareState === 'over'  && received > 0
-                    ? 'border-blue-400 focus-visible:ring-blue-400/30'       : '',
+                  compareState === 'exact' && received > 0 ? 'border-emerald-400 focus-visible:ring-emerald-400/30' :
+                  compareState === 'short' && received > 0 ? 'border-amber-400 focus-visible:ring-amber-400/30'     :
+                  compareState === 'over'  && received > 0 ? 'border-blue-400 focus-visible:ring-blue-400/30'       : '',
                 )}
               />
             </Field>
             <Field label="Damaged">
               <Input
-                type="number" min={0} placeholder="0"
-                value={qtyDamaged}
-                onChange={e => {
-                  setQtyDamaged(e.target.value);
-                  setShortReason(''); setOverReason('');
-                }}
+                type="number" min={0} placeholder="0" value={qtyDamaged}
+                onChange={e => { setQtyDamaged(e.target.value); setShortReason(''); setOverReason(''); }}
               />
             </Field>
           </div>
 
-          {/* Total summary card */}
           {received > 0 && (
             <div className={cn(
               'rounded-xl px-4 py-3 border-2 space-y-2 transition-all',
-              compareState === 'exact'
-                ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' :
-              compareState === 'short'
-                ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'         :
-              compareState === 'over'
-                ? 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800'             :
+              compareState === 'exact' ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' :
+              compareState === 'short' ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'         :
+              compareState === 'over'  ? 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800'             :
               'bg-muted/40 border-border/50',
             )}>
-              {/* Total */}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground font-medium">Total receiving</span>
                 <span className="text-xl font-black tabular-nums">{received}</span>
               </div>
-
-              {/* Good / damaged breakdown */}
               {good > 0 && damaged > 0 && (
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                    {good} good
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-orange-400 shrink-0" />
-                    {damaged} damaged
-                  </span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />{good} good</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-orange-400 shrink-0" />{damaged} damaged</span>
                 </div>
               )}
-
-              {/* Verdict line — only when system tracking */}
               {hasExpected && (
                 <div className={cn(
                   'flex items-center gap-2 pt-2 border-t text-xs font-bold',
-                  compareState === 'exact'
-                    ? 'border-emerald-200 text-emerald-700 dark:text-emerald-300' :
-                  compareState === 'short'
-                    ? 'border-amber-200 text-amber-700 dark:text-amber-300'       :
+                  compareState === 'exact' ? 'border-emerald-200 text-emerald-700 dark:text-emerald-300' :
+                  compareState === 'short' ? 'border-amber-200 text-amber-700 dark:text-amber-300'       :
                   'border-blue-200 text-blue-700 dark:text-blue-300',
                 )}>
-                  {compareState === 'exact' && (
-                    <><CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                      Exact count — driver's balance will be cleared ✓
-                    </>
-                  )}
-                  {compareState === 'short' && (
-                    <><TrendingDown className="h-3.5 w-3.5 shrink-0" />
-                      Short by {Math.abs(diff)} — select a reason below to continue
-                    </>
-                  )}
-                  {compareState === 'over' && (
-                    <><TrendingUp className="h-3.5 w-3.5 shrink-0" />
-                      Over by {diff} — select a reason below to continue
-                    </>
-                  )}
+                  {compareState === 'exact' && <><CheckCircle2 className="h-3.5 w-3.5 shrink-0" />Exact count — driver's balance will be cleared ✓</>}
+                  {compareState === 'short' && <><TrendingDown className="h-3.5 w-3.5 shrink-0" />Short by {Math.abs(diff)} — select a reason below to continue</>}
+                  {compareState === 'over'  && <><TrendingUp   className="h-3.5 w-3.5 shrink-0" />Over by {diff} — select a reason below to continue</>}
                 </div>
               )}
             </div>
           )}
 
-          {/* Reason pickers */}
           {compareState === 'short' && hasExpected && (
             <Field label="Why is the count short?" required>
-              <ReasonPicker
-                reasons={SHORT_REASONS}
-                value={shortReason}
-                onChange={setShortReason}
-                accent="amber"
-              />
+              <ReasonPicker reasons={SHORT_REASONS} value={shortReason} onChange={setShortReason} accent="amber" />
             </Field>
           )}
           {compareState === 'over' && hasExpected && (
             <Field label="Why are there extra bottles?" required>
-              <ReasonPicker
-                reasons={OVER_REASONS}
-                value={overReason}
-                onChange={setOverReason}
-                accent="blue"
-              />
+              <ReasonPicker reasons={OVER_REASONS} value={overReason} onChange={setOverReason} accent="blue" />
             </Field>
           )}
 
           <Field label="Notes" hint="Optional">
-            <Textarea
-              rows={2} className="resize-none"
-              placeholder="Any additional notes…"
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-            />
+            <Textarea rows={2} className="resize-none" placeholder="Any additional notes…" value={notes} onChange={e => setNotes(e.target.value)} />
           </Field>
         </div>
 
         <div className="flex gap-3 mt-6">
-          <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>
-            Cancel
-          </Button>
-          <Button
-            variant="ocean" className="flex-1"
-            onClick={handleSubmit}
-            disabled={!canSubmit || loading}
-          >
-            {loading
-              ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              : <ArrowDownToLine className="h-4 w-4 mr-2" />
-            }
+          <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
+          <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={!canSubmit || loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowDownToLine className="h-4 w-4 mr-2" />}
             Record Receive
           </Button>
         </div>
 
         {reasonRequired && (
           <p className="text-center text-xs text-muted-foreground mt-2">
-            {compareState === 'short'
-              ? 'Select a reason for the shortage to continue.'
-              : 'Select a reason for the extra bottles to continue.'}
+            {compareState === 'short' ? 'Select a reason for the shortage to continue.' : 'Select a reason for the extra bottles to continue.'}
           </p>
         )}
-
       </DialogContent>
     </Dialog>
   );
 };
+
 // ── Refill ────────────────────────────────────────────────────────────────────
 
 const RefillDialog: React.FC<{
@@ -1820,10 +2427,10 @@ const RefillDialog: React.FC<{
   useEffect(() => { if (open) { setProductId(''); setQuantity(''); setNotes(''); } }, [open]);
 
   const productOptions = products.map(p => ({
-    id:       p.product_id,
-    name:     p.product_name,
-    unit:     (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
-    imageUrl: (p as unknown as Record<string, string | null>).product_image ?? null,
+    id:           p.product_id,
+    name:         p.product_name,
+    unit:         (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
+    imageUrl:     (p as unknown as Record<string, string | null>).product_image ?? null,
     stockLabel:   `${p.balance.empty} empty`,
     stockVariant: (p.balance.empty <= 0 ? 'out' : p.balance.empty <= 5 ? 'low' : 'ok') as 'ok' | 'low' | 'out',
   }));
@@ -1851,7 +2458,6 @@ const RefillDialog: React.FC<{
             <div><DialogTitle className="text-base font-semibold">Refill Empties</DialogTitle><DialogDescription className="text-xs mt-0">Mark empties as refilled</DialogDescription></div>
           </div>
         </div>
-
         <div className="space-y-4">
           <Field label="Product" required>
             <Select value={productId} onValueChange={setProductId}>
@@ -1867,23 +2473,19 @@ const RefillDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           {selected && (
             <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
               <span className="text-muted-foreground">Empties available</span>
               <span className="font-semibold text-amber-600">{selected.balance.empty}</span>
             </div>
           )}
-
           <Field label="Quantity" required>
             <Input type="number" min={1} placeholder="0" max={selected?.balance.empty} value={quantity} onChange={e => setQuantity(e.target.value)} />
           </Field>
-
           <Field label="Notes">
             <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
           </Field>
         </div>
-
         <div className="flex gap-3 mt-6">
           <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
@@ -1913,10 +2515,10 @@ const DistributeBottlesDialog: React.FC<{
   useEffect(() => { if (open) { setProductId(''); setDriverId(''); setQuantity(''); setNotes(''); } }, [open]);
 
   const productOptions = products.map(p => ({
-    id:       p.product_id,
-    name:     p.product_name,
-    unit:     (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
-    imageUrl: (p as unknown as Record<string, string | null>).product_image ?? null,
+    id:           p.product_id,
+    name:         p.product_name,
+    unit:         (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
+    imageUrl:     (p as unknown as Record<string, string | null>).product_image ?? null,
     stockLabel:   `${p.balance.full} full`,
     stockVariant: (p.balance.full <= 0 ? 'out' : p.balance.full <= 5 ? 'low' : 'ok') as 'ok' | 'low' | 'out',
   }));
@@ -1945,7 +2547,6 @@ const DistributeBottlesDialog: React.FC<{
             <div><DialogTitle className="text-base font-semibold">Distribute to Van</DialogTitle><DialogDescription className="text-xs mt-0">Load full bottles onto driver's van</DialogDescription></div>
           </div>
         </div>
-
         <div className="space-y-4">
           <Field label="Product" required>
             <Select value={productId} onValueChange={setProductId}>
@@ -1961,14 +2562,12 @@ const DistributeBottlesDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           {selected && (
             <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
               <span className="text-muted-foreground">Full bottles available</span>
               <span className="font-semibold text-emerald-600">{selected.balance.full}</span>
             </div>
           )}
-
           <Field label="Driver" required>
             <Select value={driverId} onValueChange={setDriverId}>
               <SelectTrigger><SelectValue placeholder="Select driver…" /></SelectTrigger>
@@ -1979,16 +2578,13 @@ const DistributeBottlesDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           <Field label="Quantity" required>
             <Input type="number" min={1} placeholder="0" max={selected?.balance.full} value={quantity} onChange={e => setQuantity(e.target.value)} />
           </Field>
-
           <Field label="Notes">
             <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
           </Field>
         </div>
-
         <div className="flex gap-3 mt-6">
           <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
@@ -2000,180 +2596,833 @@ const DistributeBottlesDialog: React.FC<{
   );
 };
 
-// ── Direct Sale ───────────────────────────────────────────────────────────────
-// ✅ Updated: shows DriverSaleReceiptModal after a successful sale
+interface CustomerResult {
+  id:    string;
+  name:  string;
+  phone: string;
+  email: string;
+}
+ 
+type SaleStep = 'customer' | 'sale';
 
-const DirectSaleDialog: React.FC<{
-  open:    boolean;
-  mode:    'bottle' | 'consumable';
-  products: Array<{
-    id:             string;
-    name:           string;
-    maxQty:         number;
-    selling_price?: string;
-    unit?:          string;
-    imageUrl?:      string | null;
-  }>;
-  onClose: () => void;
-  onSaved: (id: string) => void;
-}> = ({ open, mode, products, onClose, onSaved }) => {
-  const { toast }  = useToast();
-  const { user }   = useAuth();
-
-  const [loading,      setLoading]      = useState(false);
-  const [productId,    setProductId]    = useState('');
-  const [quantity,     setQuantity]     = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [notes,        setNotes]        = useState('');
-
-  // ── Receipt state ─────────────────────────────────────────────────────────
-  const [showReceipt, setShowReceipt] = useState(false);
-  const [receiptData, setReceiptData] = useState<DriverSaleData | null>(null);
-
-  const selected = products.find(p => p.id === productId);
+// ── Customer picker step ──────────────────────────────────────────────────────
+const CustomerPickerStep: React.FC<{
+  onSelect: (c: CustomerResult) => void;
+  onWalkIn: () => void;
+}> = ({ onSelect, onWalkIn }) => {
+  const { toast } = useToast();
+  const [customers, setCustomers] = useState<CustomerResult[]>([]);
+  const [filtered, setFiltered] = useState<CustomerResult[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [fetchAttempted, setFetchAttempted] = useState(false);
 
   useEffect(() => {
-    if (open) { setProductId(''); setQuantity(''); setCustomerName(''); setNotes(''); }
+    let isMounted = true;
+    
+    const fetchCustomers = async () => {
+      if (fetchAttempted) return;
+      setFetchAttempted(true);
+      
+      try {
+        const result = await customerAdminService.getCustomers({ limit: 100 });
+        
+        const raw: CustomerResult[] = (result.data ?? []).map(c => ({
+          id:    c.id,
+          name:  c.full_name,
+          phone: c.phone_number,
+          email: c.email ?? '',
+        }));
+        
+        setCustomers(raw);
+        setFiltered(raw);
+        
+        if (raw.length === 0) {
+          setError('No customers found.');
+        }
+      } catch (err) {
+        setError('Could not load customers. Walk-in sales are still supported.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [toast, fetchAttempted]);
+
+  useEffect(() => {
+    if (!query.trim()) { 
+      setFiltered(customers); 
+      return; 
+    }
+    const q = query.toLowerCase();
+    setFiltered(customers.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      (c.phone && c.phone.includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)),
+    ));
+  }, [query, customers]);
+
+  return (
+    <div className="space-y-4 pb-2">
+      <div className="flex flex-col items-center gap-2 pt-2 pb-1">
+        <div className="h-14 w-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+          <User className="h-7 w-7 text-amber-600" />
+        </div>
+        <p className="font-bold text-base">Who is this sale for?</p>
+        <p className="text-sm text-muted-foreground text-center max-w-[260px]">
+          Select an existing customer or record as a walk-in.
+        </p>
+      </div>
+
+      {/* Search input - only show if we have customers or not loading */}
+      {(customers.length > 0 || (!loading && error)) && (
+        <div className="relative">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Filter by name or phone…"
+            disabled={customers.length === 0}
+            className="w-full h-11 pl-10 pr-10 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:border-amber-400/50 disabled:opacity-50"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Walk-in button - always available */}
+      <button
+        onClick={onWalkIn}
+        className="w-full flex items-center gap-3 p-3.5 rounded-xl border-2 border-dashed border-border/60 hover:border-amber-400/40 hover:bg-amber-500/5 active:scale-[0.98] transition-all text-left"
+      >
+        <div className="h-10 w-10 rounded-xl bg-muted/60 flex items-center justify-center shrink-0">
+          <User className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div className="flex-1">
+          <p className="font-semibold text-sm">Walk-in / Roadside Customer</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Record without linking to an account.</p>
+        </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+      </button>
+
+      {/* Show error message if any */}
+      {error && (
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 text-center">
+          <p className="text-xs text-amber-700 dark:text-amber-400">{error}</p>
+          {error.includes('Permission denied') && (
+            <Button 
+              variant="link" 
+              size="sm" 
+              className="text-xs mt-1 h-auto p-0"
+              onClick={() => window.location.href = '/customers'}
+            >
+              Go to Customers page
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Only show customer section if we have customers */}
+      {customers.length > 0 && (
+        <>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border/50" />
+            <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Existing customers</span>
+            <div className="flex-1 h-px bg-border/50" />
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading customers…</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
+              <Search className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm font-semibold text-muted-foreground">
+                {query ? 'No customers match your filter' : 'No customers found'}
+              </p>
+              {query && (
+                <button onClick={() => setQuery('')} className="text-xs text-primary underline underline-offset-2">
+                  Clear filter
+                </button>
+              )}
+              {!query && (
+                <Button 
+                  variant="link" 
+                  size="sm" 
+                  className="text-xs mt-1"
+                  onClick={() => window.location.href = '/customers'}
+                >
+                  Add customers
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-0.5 pb-2">
+              <p className="text-xs text-muted-foreground px-1">
+                {filtered.length} customer{filtered.length !== 1 ? 's' : ''}
+                {query ? ` matching "${query}"` : ''}
+              </p>
+              {filtered.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => onSelect(c)}
+                  className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-border/60 bg-card hover:border-amber-400/40 hover:bg-amber-500/5 active:scale-[0.98] transition-all text-left"
+                >
+                  <div className="h-10 w-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0 font-bold text-base">
+                    {c.name.trim()[0]?.toUpperCase() ?? '?'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{c.name}</p>
+                    {c.phone && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <Phone className="h-3 w-3 shrink-0" />{c.phone}
+                      </p>
+                    )}
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+// ── Sale qty stepper — amber, min=1 ──────────────────────────────────────────
+ 
+const QtyStepper: React.FC<{
+  value: number; max: number; onChange: (n: number) => void;
+}> = ({ value, max, onChange }) => (
+  <div className="flex items-center justify-center gap-6">
+    <button
+      onClick={() => onChange(Math.max(1, value - 1))}
+      disabled={value <= 1}
+      className="h-12 w-12 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center hover:bg-muted disabled:opacity-30 transition-colors active:scale-90"
+    >
+      <Minus className="h-5 w-5" />
+    </button>
+    <div className="text-center min-w-[64px]">
+      <span className="text-4xl font-black tabular-nums text-amber-600">{value}</span>
+      <p className="text-[10px] text-muted-foreground mt-0.5">of {max}</p>
+    </div>
+    <button
+      onClick={() => onChange(Math.min(max, value + 1))}
+      disabled={value >= max}
+      className="h-12 w-12 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center hover:bg-muted disabled:opacity-30 transition-colors active:scale-90"
+    >
+      <Plus className="h-5 w-5" />
+    </button>
+  </div>
+);
+ 
+// ── Collect empties stepper — blue, min=0 ────────────────────────────────────
+ 
+const QtyStepperWithZero: React.FC<{
+  value: number; max: number; onChange: (n: number) => void;
+}> = ({ value, max, onChange }) => (
+  <div className="flex items-center justify-center gap-6">
+    <button
+      onClick={() => onChange(Math.max(0, value - 1))}
+      disabled={value <= 0}
+      className="h-12 w-12 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center hover:bg-muted disabled:opacity-30 transition-colors active:scale-90"
+    >
+      <Minus className="h-5 w-5" />
+    </button>
+    <div className="text-center min-w-[64px]">
+      <span className="text-4xl font-black tabular-nums text-blue-600">{value}</span>
+      <p className="text-[10px] text-muted-foreground mt-0.5">of {max}</p>
+    </div>
+    <button
+      onClick={() => onChange(Math.min(max, value + 1))}
+      disabled={value >= max}
+      className="h-12 w-12 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center hover:bg-muted disabled:opacity-30 transition-colors active:scale-90"
+    >
+      <Plus className="h-5 w-5" />
+    </button>
+  </div>
+);
+ 
+// ── Product card ──────────────────────────────────────────────────────────────
+ 
+interface SaleProductOption {
+  id:           string;
+  name:         string;
+  maxQty:       number;
+  selling_price?: string;
+  unit?:         string;
+  imageUrl?:     string | null;
+}
+ 
+const SaleProductCard: React.FC<{
+  product:  SaleProductOption;
+  selected: boolean;
+  onSelect: () => void;
+}> = ({ product, selected, onSelect }) => (
+  <button
+    onClick={onSelect}
+    disabled={product.maxQty <= 0}
+    className={cn(
+      'w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left',
+      selected
+        ? 'border-amber-400 bg-amber-500/5 ring-1 ring-amber-400/20'
+        : product.maxQty <= 0
+          ? 'border-border/40 bg-muted/20 opacity-50 cursor-not-allowed'
+          : 'border-border/60 bg-card hover:border-border active:scale-[0.98]',
+    )}
+  >
+    <div className="h-10 w-10 rounded-xl bg-muted/60 flex items-center justify-center shrink-0 overflow-hidden border border-border/30">
+      {product.imageUrl
+        ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+        : <ImageOff className="h-4 w-4 text-muted-foreground/40" />
+      }
+    </div>
+    <div className="flex-1 min-w-0">
+      <p className="text-sm font-semibold truncate">{product.name}</p>
+      <div className="flex items-center gap-2 mt-0.5">
+        {product.unit && (
+          <span className={cn('text-[10px] font-semibold px-1.5 rounded-full', getUnitColor(product.unit))}>
+            {getUnitLabel(product.unit)}
+          </span>
+        )}
+        <p className={cn(
+          'text-xs font-medium',
+          product.maxQty <= 0 ? 'text-destructive' : product.maxQty <= 5 ? 'text-amber-600' : 'text-muted-foreground',
+        )}>
+          {product.maxQty <= 0 ? 'Out of stock' : `${product.maxQty} available`}
+        </p>
+        {product.selling_price && parseFloat(product.selling_price) > 0 && (
+          <span className="text-xs font-semibold text-emerald-600">
+            KES {parseFloat(product.selling_price).toLocaleString('en-KE')}
+          </span>
+        )}
+      </div>
+    </div>
+    {selected && <Check className="h-4 w-4 text-amber-600 shrink-0" />}
+  </button>
+);
+ 
+// ── Main DirectSaleDialog ─────────────────────────────────────────────────────
+// ── Payment method options for DirectSaleDialog ───────────────────────────
+const DIRECT_SALE_PAYMENT_METHODS = [
+  { value: 'CASH',          label: 'Cash',               icon: '💵', desc: 'Collect cash on the spot'    },
+  { value: 'MPESA',         label: 'M-Pesa',             icon: '📱', desc: 'Mobile money transfer'        },
+  { value: 'BANK_TRANSFER', label: 'Bank Transfer',      icon: '🏦', desc: 'Direct bank payment'          },
+  { value: 'CREDIT',        label: 'Pay Later (Credit)', icon: '🧾', desc: 'Added to customer invoice'    },
+] as const;
+type DirectSalePM = typeof DIRECT_SALE_PAYMENT_METHODS[number]['value'];
+
+const DirectSaleDialog: React.FC<{
+  open:     boolean;
+  mode:     'bottle' | 'consumable';
+  products: SaleProductOption[];
+  onClose:  () => void;
+  onSaved:  (id: string) => void;
+}> = ({ open, mode, products, onClose, onSaved }) => {
+  const { toast } = useToast();
+  const { user }  = useAuth();
+ 
+  const [step,             setStep]             = useState<SaleStep>('customer');
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
+  const [isWalkIn,         setIsWalkIn]         = useState(false);
+  const [customerName,     setCustomerName]     = useState('');
+  const [productId,        setProductId]        = useState('');
+  const [qty,              setQty]              = useState(1);
+  const [qtyCollected,     setQtyCollected]     = useState(0);
+  const [notes,            setNotes]            = useState('');
+  const [loading,          setLoading]          = useState(false);
+  const [showReceipt,      setShowReceipt]      = useState(false);
+  const [receiptData,      setReceiptData]      = useState<DriverSaleData | null>(null);
+
+  // ── NEW: payment detection state ──────────────────────────────────────────
+  const [customerProfile,  setCustomerProfile]  = useState<AdminCustomer | null>(null);
+  const [profileLoading,   setProfileLoading]   = useState(false);
+  const [paymentMethod,    setPaymentMethod]    = useState<DirectSalePM | ''>('');
+ 
+  // Reset on open
+  useEffect(() => {
+    if (open) {
+      setStep('customer');
+      setSelectedCustomer(null);
+      setIsWalkIn(false);
+      setCustomerName('');
+      setProductId('');
+      setQty(1);
+      setQtyCollected(0);
+      setNotes('');
+      // NEW
+      setCustomerProfile(null);
+      setProfileLoading(false);
+      setPaymentMethod('');
+    }
   }, [open]);
+ 
+  const handleSelectCustomer = async (c: CustomerResult) => {
+    setSelectedCustomer(c);
+    setCustomerName(c.name);
+    setIsWalkIn(false);
+    setStep('sale');
 
-  const productOptions = products.map(p => ({
-    id:           p.id,
-    name:         p.name,
-    unit:         p.unit,
-    imageUrl:     p.imageUrl ?? null,
-    stockLabel:   `${p.maxQty} in stock`,
-    stockVariant: (
-      p.maxQty <= 0
-        ? 'out'
-        : p.maxQty <= (mode === 'bottle' ? 5 : 10)
-          ? 'low'
-          : 'ok'
-    ) as 'ok' | 'low' | 'out',
-  }));
+    // Fetch full profile to detect credit status
+    setProfileLoading(true);
+    try {
+      const profile = await customerAdminService.getCustomer(c.id);
+      setCustomerProfile(profile);
 
+      const ct = profile.credit_terms;
+      const frozen = ct?.account_frozen ?? false;
+      const hasActiveCredit = !!ct && !frozen;
+
+      if (hasActiveCredit) {
+        setPaymentMethod('CREDIT');
+      } else if (frozen) {
+        setPaymentMethod('CASH');
+      } else {
+        setPaymentMethod('CASH');
+      }
+    } catch {
+      setCustomerProfile(null);
+      setPaymentMethod('CASH');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+ 
+  const handleWalkIn = () => {
+    setSelectedCustomer(null);
+    setCustomerProfile(null);
+    setIsWalkIn(true);
+    setCustomerName('');
+    setPaymentMethod('CASH');
+    setStep('sale');
+  };
+ 
+  const handleBack = () => {
+    setStep('customer');
+    setSelectedCustomer(null);
+    setCustomerProfile(null);
+    setIsWalkIn(false);
+    setCustomerName('');
+    setPaymentMethod('');
+    setProductId('');
+    setQty(1);
+    setQtyCollected(0);
+  };
+ 
+  const selected = products.find(p => p.id === productId);
+  const isReturnable = mode === 'bottle';
+  const unitPrice = selected?.selling_price ? parseFloat(selected.selling_price) : 0;
+ 
+  const canSubmit =
+    !!productId &&
+    qty >= 1 &&
+    !!paymentMethod &&
+    !(isWalkIn && !customerName.trim());
+ 
   const handleSubmit = async () => {
-    if (!productId) return toast({ title: 'Select a product', variant: 'destructive' });
-    const qty = parseInt(quantity) || 0;
-    if (qty < 1) return toast({ title: 'Enter quantity', variant: 'destructive' });
-
+    if (!canSubmit) return;
     setLoading(true);
     try {
+      const finalNotes = [
+        selectedCustomer
+          ? `Customer: ${selectedCustomer.name}${selectedCustomer.phone ? ` (${selectedCustomer.phone})` : ''}`
+          : customerName.trim()
+            ? `Walk-in: ${customerName.trim()}`
+            : 'Walk-in sale',
+        paymentMethod ? `Payment: ${paymentMethod}` : '',
+        notes.trim(),
+      ].filter(Boolean).join(' · ');
+ 
       if (mode === 'bottle') {
         await bottleStoreService.directSale({
           product:       productId,
           quantity:      qty,
-          customer_name: customerName,
-          notes,
+          customer_id:   selectedCustomer?.id,
+          customer_name: selectedCustomer?.name ?? customerName.trim(),
+          qty_collected: qtyCollected,
+          notes:         finalNotes,
         });
       } else {
         await consumableStoreService.directSale({
           product:       productId,
           quantity:      qty,
-          customer_name: customerName,
-          notes,
+          customer_id:   selectedCustomer?.id,
+          customer_name: selectedCustomer?.name ?? customerName.trim(),
+          notes:         finalNotes,
         });
       }
-
-      toast({ title: `Direct sale — ${qty} units recorded.` });
-
-      // ── Build receipt ────────────────────────────────────────────────────
+ 
+      toast({ title: `Sale recorded — ${qty} × ${selected?.name}` } as Parameters<typeof toast>[0]);
+ 
       const servedBy = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Store Admin';
-
       const receipt: DriverSaleData = {
-        productName:   selected?.name    ?? 'Product',
-        productUnit:   selected?.unit    ?? (mode === 'bottle' ? 'BOTTLES' : 'UNITS'),
-        isReturnable:  mode === 'bottle',
+        productName:   selected?.name ?? 'Product',
+        productUnit:   selected?.unit ?? (mode === 'bottle' ? 'BOTTLES' : 'UNITS'),
+        isReturnable,
         quantity:      qty,
-        unitPrice:     selected?.selling_price ? parseFloat(selected.selling_price) : 0,
-        customerName:  customerName.trim() || 'Walk-in Customer',
-        customerPhone: undefined,
-        isWalkIn:      true,
+        unitPrice,
+        customerName:  (selectedCustomer?.name ?? customerName.trim()) || 'Walk-in Customer',
+        customerPhone: selectedCustomer?.phone ?? undefined,
+        isWalkIn:      !selectedCustomer,
         paymentMethod: 'CASH',
         servedBy,
         date:          new Date().toISOString(),
       };
-
-      // Show receipt before calling onSaved so parent can reload stock in bg
+ 
       setReceiptData(receipt);
       setShowReceipt(true);
-      onClose();           // close the sale form dialog
-      onSaved(productId);  // trigger stock refresh on the parent
-
+      onClose();
+      onSaved(productId);
     } catch (err: unknown) {
       toast({
         title:       'Error',
         description: (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to record sale.',
         variant:     'destructive',
-      });
+      } as Parameters<typeof toast>[0]);
     } finally {
       setLoading(false);
     }
   };
-
+ 
+  const dialogTitle = step === 'customer'
+    ? 'Direct Sale — Select Customer'
+    : selectedCustomer
+      ? `Sale for ${selectedCustomer.name}`
+      : 'Walk-in Sale';
+ 
   return (
     <>
-      <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-sm max-h-[90dvh] overflow-y-auto">
-          <div className="bg-gradient-to-br from-amber-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-5 border-b border-border/60">
+      <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+        <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
+ 
+          {/* Header */}
+          <div className="bg-gradient-to-br from-amber-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-2 border-b border-border/60">
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20"><ShoppingBag className="h-5 w-5" /></div>
-              <div><DialogTitle className="text-base font-semibold">Direct Sale</DialogTitle><DialogDescription className="text-xs mt-0">Walk-in or one-time customer</DialogDescription></div>
+              <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <DialogTitle className="text-base font-semibold truncate">{dialogTitle}</DialogTitle>
+                <DialogDescription className="text-xs mt-0">
+                  {step === 'customer' ? 'Choose a customer to continue' : 'Configure and record the sale'}
+                </DialogDescription>
+              </div>
+              {step === 'sale' && (
+                <button
+                  onClick={handleBack}
+                  className="text-xs font-semibold text-amber-600 px-2 py-1 rounded-lg hover:bg-amber-500/10 transition-colors shrink-0"
+                >
+                  ← Back
+                </button>
+              )}
             </div>
           </div>
-
-          <div className="space-y-4">
-            <Field label="Product" required>
-              <Select value={productId} onValueChange={setProductId}>
-                <SelectTrigger className="h-11">
-                  <ProductSelectTrigger selectedId={productId} products={productOptions} placeholder="Select product…" />
-                </SelectTrigger>
-                <SelectContent className="max-h-64">
-                  {productOptions.map(p => (
-                    <SelectItem key={p.id} value={p.id} className="py-1.5">
-                      <ProductDropdownItem name={p.name} unit={p.unit} imageUrl={p.imageUrl} stockLabel={p.stockLabel} stockVariant={p.stockVariant} />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {selected?.selling_price && (
-              <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">Price per unit</span>
-                <span className="font-semibold">KES {parseFloat(selected.selling_price).toLocaleString()}</span>
+ 
+          {/* Step 1 — customer picker */}
+          {step === 'customer' && (
+            <CustomerPickerStep onSelect={handleSelectCustomer} onWalkIn={handleWalkIn} />
+          )}
+ 
+          {/* Step 2 — sale form */}
+          {step === 'sale' && (
+            <div className="space-y-5 pb-2">
+ 
+              {/* Customer chip */}
+              <div className={cn(
+                'flex items-center gap-3 p-3.5 rounded-xl border-2',
+                selectedCustomer
+                  ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800'
+                  : 'border-border/60 bg-muted/30',
+              )}>
+                {selectedCustomer ? (
+                  <>
+                    <UserCheck className="h-5 w-5 text-emerald-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm text-emerald-800 dark:text-emerald-300 truncate">
+                        {selectedCustomer.name}
+                      </p>
+                      {selectedCustomer.phone && (
+                        <p className="text-xs text-emerald-700/80 dark:text-emerald-400 flex items-center gap-1 mt-0.5">
+                          <Phone className="h-3 w-3" />{selectedCustomer.phone}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-full px-2 py-0.5 shrink-0">
+                      Account
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <User className="h-5 w-5 text-muted-foreground shrink-0" />
+                    <p className="font-semibold text-sm text-muted-foreground">Walk-in Customer</p>
+                  </>
+                )}
               </div>
-            )}
 
-            <Field label="Quantity" required>
-              <Input type="number" min={1} placeholder="0" max={selected?.maxQty} value={quantity} onChange={e => setQuantity(e.target.value)} />
-            </Field>
+              {/* ── Payment method selector ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Payment Method</p>
+                  {profileLoading && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Detecting…
+                    </span>
+                  )}
+                </div>
 
-            <Field label="Customer name" hint="Leave blank if anonymous">
-              <Input placeholder="e.g. John Kamau" value={customerName} onChange={e => setCustomerName(e.target.value)} />
-            </Field>
+                {/* Frozen credit warning */}
+                {customerProfile?.credit_terms?.account_frozen && (
+                  <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-destructive/8 border border-destructive/20">
+                    <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-destructive">Credit account frozen</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        This customer's credit is paused due to an outstanding balance. Please collect payment now.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-            <Field label="Notes">
-              <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
-            </Field>
-          </div>
+                {/* Grace period warning */}
+                {customerProfile?.credit_terms?.is_in_grace_period && !customerProfile?.credit_terms?.account_frozen && (
+                  <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20">
+                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Invoice overdue — grace period active</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {customerProfile.credit_terms.grace_days_remaining ?? 0} grace day(s) remaining.
+                        Credit is still available but payment is overdue.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-          <div className="flex gap-3 mt-6">
-            <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
-            <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ShoppingBag className="h-4 w-4 mr-2" />}Record Sale
-            </Button>
-          </div>
+                {/* Credit summary chip — shown when credit is auto-selected and active */}
+                {paymentMethod === 'CREDIT' && customerProfile?.credit_terms && !customerProfile.credit_terms.account_frozen && (
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-purple-500/8 border border-purple-300/40 dark:border-purple-700/40">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🧾</span>
+                      <div>
+                        <p className="text-xs font-bold text-purple-700 dark:text-purple-300">Credit account</p>
+                        <p className="text-xs text-muted-foreground">
+                          {customerProfile.credit_terms.billing_cycle_display} billing
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">Available credit</p>
+                      <p className="text-sm font-bold text-purple-700 dark:text-purple-300 tabular-nums">
+                        KES {parseFloat(customerProfile.credit_terms.available_credit).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment method buttons */}
+                <div className="space-y-2">
+                  {DIRECT_SALE_PAYMENT_METHODS
+                    .filter(pm => {
+                      // Walk-in: cash and mpesa only
+                      if (isWalkIn) return pm.value === 'CASH' || pm.value === 'MPESA';
+                      // Frozen credit customers cannot use credit
+                      if (customerProfile?.credit_terms?.account_frozen && pm.value === 'CREDIT') return false;
+                      // Non-credit customers cannot use credit
+                      if (!customerProfile?.credit_terms && pm.value === 'CREDIT') return false;
+                      return true;
+                    })
+                    .map(pm => (
+                      <button
+                        key={pm.value}
+                        type="button"
+                        disabled={
+                          pm.value === 'CREDIT' &&
+                          !!(customerProfile?.credit_terms?.account_frozen)
+                        }
+                        onClick={() => setPaymentMethod(pm.value)}
+                        className={cn(
+                          'flex items-center gap-3 w-full px-4 py-3 rounded-xl border-2 text-left transition-all',
+                          'disabled:opacity-40 disabled:cursor-not-allowed',
+                          paymentMethod === pm.value
+                            ? pm.value === 'CREDIT'
+                              ? 'border-purple-400/60 bg-purple-500/8 ring-1 ring-purple-400/20'
+                              : pm.value === 'MPESA'
+                              ? 'border-green-400/60 bg-green-500/8 ring-1 ring-green-400/20'
+                              : pm.value === 'BANK_TRANSFER'
+                              ? 'border-blue-400/60 bg-blue-500/8 ring-1 ring-blue-400/20'
+                              : 'border-emerald-400/60 bg-emerald-500/8 ring-1 ring-emerald-400/20'
+                            : 'border-border/60 bg-card hover:bg-muted/30',
+                        )}
+                      >
+                        <span className="text-xl shrink-0">{pm.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            'text-sm font-bold',
+                            paymentMethod === pm.value
+                              ? pm.value === 'CREDIT' ? 'text-purple-700 dark:text-purple-300'
+                              : pm.value === 'MPESA'  ? 'text-green-700 dark:text-green-300'
+                              : pm.value === 'BANK_TRANSFER' ? 'text-blue-700 dark:text-blue-300'
+                              : 'text-emerald-700 dark:text-emerald-300'
+                              : 'text-foreground',
+                          )}>
+                            {pm.label}
+                            {paymentMethod === pm.value && ' ✓'}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{pm.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Walk-in name */}
+              {isWalkIn && (
+                <Field label="Customer Name" required>
+                  <Input
+                    value={customerName}
+                    onChange={e => setCustomerName(e.target.value)}
+                    placeholder="Enter customer name"
+                    autoFocus
+                  />
+                </Field>
+              )}
+ 
+              {/* Product list */}
+              <Field label="Product" required>
+                {products.length === 0 ? (
+                  <div className="text-center py-6 rounded-xl border border-dashed border-border">
+                    <p className="text-sm text-muted-foreground">No {mode === 'bottle' ? 'bottles' : 'consumables'} in store.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
+                    {products.map(p => (
+                      <SaleProductCard
+                        key={p.id}
+                        product={p}
+                        selected={productId === p.id}
+                        onSelect={() => { setProductId(p.id); setQty(1); setQtyCollected(0); }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Field>
+ 
+              {/* Qty stepper — amber */}
+              {selected && selected.maxQty > 0 && (
+                <Field label="Quantity">
+                  <div className="py-2">
+                    <QtyStepper
+                      value={qty}
+                      max={selected.maxQty}
+                      onChange={v => { setQty(v); setQtyCollected(c => Math.min(c, v)); }}
+                    />
+                  </div>
+                  {unitPrice > 0 && (
+                    <p className="text-center text-sm font-bold text-emerald-600 mt-2">
+                      Total: KES {(qty * unitPrice).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                    </p>
+                  )}
+                </Field>
+              )}
+ 
+              {/* Collect empties — blue stepper, only for bottles */}
+              {isReturnable && selected && selected.maxQty > 0 && qty > 0 && (
+                <div className="rounded-2xl border-2 border-blue-100 dark:border-blue-900/40 bg-card p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-bold flex items-center gap-2">
+                      <RotateCcw className="h-4 w-4 text-blue-600" />
+                      Collect empty bottles back
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      How many empty bottles is the customer returning now?
+                    </p>
+                  </div>
+ 
+                  <QtyStepperWithZero
+                    value={qtyCollected}
+                    max={qty}
+                    onChange={setQtyCollected}
+                  />
+ 
+                  {qtyCollected === 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-800">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        No empties collected — customer owes {qty} bottle{qty !== 1 ? 's' : ''} back.
+                      </p>
+                    </div>
+                  )}
+                  {qtyCollected > 0 && qtyCollected < qty && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-800">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        {qty - qtyCollected} bottle{qty - qtyCollected !== 1 ? 's' : ''} still outstanding.
+                      </p>
+                    </div>
+                  )}
+                  {qtyCollected === qty && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl dark:bg-emerald-950/30 dark:border-emerald-800">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 font-bold">
+                        All empties collected ✓
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+ 
+              {/* Notes */}
+              <Field label="Notes (optional)">
+                <Textarea
+                  rows={2}
+                  className="resize-none"
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Any notes about this sale…"
+                />
+              </Field>
+ 
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="ocean"
+                  className="flex-1"
+                  onClick={handleSubmit}
+                  disabled={!canSubmit || loading}
+                >
+                  {loading
+                    ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    : <ShoppingBag className="h-4 w-4 mr-2" />
+                  }
+                  {selectedCustomer ? `Sell to ${selectedCustomer.name}` : 'Record Walk-in Sale'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
-
-      {/* Receipt modal — fixed overlay, renders above everything */}
+ 
       {receiptData && (
         <DriverSaleReceiptModal
           open={showReceipt}
-          onClose={() => {
-            setShowReceipt(false);
-            setReceiptData(null);
-          }}
+          onClose={() => { setShowReceipt(false); setReceiptData(null); }}
           sale={receiptData}
         />
       )}
@@ -2197,10 +3446,10 @@ const ReceiveConsumableDialog: React.FC<{
   useEffect(() => { if (open) { setProductId(''); setQuantity(''); setSupplierName(''); setNotes(''); } }, [open]);
 
   const productOptions = products.map(p => ({
-    id:       p.product_id,
-    name:     p.product_name,
-    unit:     p.unit,
-    imageUrl: (p as unknown as Record<string, string | null>).product_image ?? null,
+    id:           p.product_id,
+    name:         p.product_name,
+    unit:         p.unit,
+    imageUrl:     (p as unknown as Record<string, string | null>).product_image ?? null,
     stockLabel:   `${p.balance.in_stock} in stock`,
     stockVariant: (p.balance.in_stock <= 0 ? 'out' : p.balance.in_stock <= 10 ? 'low' : 'ok') as 'ok' | 'low' | 'out',
   }));
@@ -2228,7 +3477,6 @@ const ReceiveConsumableDialog: React.FC<{
             <div><DialogTitle className="text-base font-semibold">Receive Stock</DialogTitle><DialogDescription className="text-xs mt-0">Add stock from supplier</DialogDescription></div>
           </div>
         </div>
-
         <div className="space-y-4">
           <Field label="Product" required>
             <Select value={productId} onValueChange={setProductId}>
@@ -2244,20 +3492,16 @@ const ReceiveConsumableDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           <Field label="Quantity" required>
             <Input type="number" min={1} placeholder="0" value={quantity} onChange={e => setQuantity(e.target.value)} />
           </Field>
-
           <Field label="Supplier" hint="Optional">
             <Input placeholder="e.g. Aqua Supplier Ltd" value={supplierName} onChange={e => setSupplierName(e.target.value)} />
           </Field>
-
           <Field label="Notes" hint="Invoice, batch, etc.">
             <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
           </Field>
         </div>
-
         <div className="flex gap-3 mt-6">
           <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
@@ -2287,10 +3531,10 @@ const DistributeConsumableDialog: React.FC<{
   useEffect(() => { if (open) { setProductId(''); setDriverId(''); setQuantity(''); setNotes(''); } }, [open]);
 
   const productOptions = products.map(p => ({
-    id:       p.product_id,
-    name:     p.product_name,
-    unit:     p.unit,
-    imageUrl: (p as unknown as Record<string, string | null>).product_image ?? null,
+    id:           p.product_id,
+    name:         p.product_name,
+    unit:         p.unit,
+    imageUrl:     (p as unknown as Record<string, string | null>).product_image ?? null,
     stockLabel:   `${p.balance.in_stock} in stock`,
     stockVariant: (p.balance.in_stock <= 0 ? 'out' : p.balance.in_stock <= 10 ? 'low' : 'ok') as 'ok' | 'low' | 'out',
   }));
@@ -2319,7 +3563,6 @@ const DistributeConsumableDialog: React.FC<{
             <div><DialogTitle className="text-base font-semibold">Distribute to Van</DialogTitle><DialogDescription className="text-xs mt-0">Load consumables onto driver's van</DialogDescription></div>
           </div>
         </div>
-
         <div className="space-y-4">
           <Field label="Product" required>
             <Select value={productId} onValueChange={setProductId}>
@@ -2335,14 +3578,12 @@ const DistributeConsumableDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           {selected && (
             <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
               <span className="text-muted-foreground">Available</span>
               <span className="font-semibold">{selected.balance.in_stock}</span>
             </div>
           )}
-
           <Field label="Driver" required>
             <Select value={driverId} onValueChange={setDriverId}>
               <SelectTrigger><SelectValue placeholder="Select driver…" /></SelectTrigger>
@@ -2353,16 +3594,13 @@ const DistributeConsumableDialog: React.FC<{
               </SelectContent>
             </Select>
           </Field>
-
           <Field label="Quantity" required>
             <Input type="number" min={1} placeholder="0" max={selected?.balance.in_stock} value={quantity} onChange={e => setQuantity(e.target.value)} />
           </Field>
-
           <Field label="Notes">
             <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
           </Field>
         </div>
-
         <div className="flex gap-3 mt-6">
           <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
@@ -2388,6 +3626,7 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
   const [bottleProducts,     setBottleProducts]     = useState<BottleProductStore[]>([]);
   const [consumableProducts, setConsumableProducts] = useState<ConsumableProductStore[]>([]);
   const [drivers,            setDrivers]            = useState<Employee[]>([]);
+  const [driverVanStock,     setDriverVanStock]     = useState<DriverVanStock[]>([]);
   const [isLoading,          setIsLoading]          = useState(true);
 
   const [bottleDialog,     setBottleDialog]     = useState<BottleDialog>(null);
@@ -2414,18 +3653,23 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
   const [cDriverFilter, setCDriverFilter] = useState('');
   const [cExpanded,     setCExpanded]     = useState<Set<string>>(new Set());
 
+  // Driver Stock tab state
+  const [dvSearch, setDvSearch] = useState('');
+
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [bottles, consumables, driverList] = await Promise.all([
+      const [bottles, consumables, driverList, vanStock] = await Promise.all([
         bottleStoreService.getAll(),
         consumableStoreService.getAll(),
         fetchDrivers(),
+        driverVanStockService.getAll(),
       ]);
       setBottleProducts(bottles);
       setConsumableProducts(consumables);
       setDrivers(driverList);
+      setDriverVanStock(vanStock);
     } catch {
       toast({ title: 'Error', description: 'Failed to load store data.', variant: 'destructive' });
     } finally {
@@ -2460,8 +3704,8 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
   // ── Filtered + sorted bottles ──────────────────────────────────────────────
   const filteredBottles = useMemo(() => {
     let result = [...bottleProducts];
-    if (bSearch)            result = result.filter(p => p.product_name.toLowerCase().includes(bSearch.toLowerCase()));
-    if (bFilter === 'out')  result = result.filter(p => p.balance.full <= 0);
+    if (bSearch)               result = result.filter(p => p.product_name.toLowerCase().includes(bSearch.toLowerCase()));
+    if (bFilter === 'out')     result = result.filter(p => p.balance.full <= 0);
     else if (bFilter === 'low') result = result.filter(p => p.balance.full > 0 && p.balance.full <= 5);
     result = result.filter(p => passesToolbarDTF(p.history, bDTF));
     if (bGroup === 'driver' && bDriverFilter) {
@@ -2483,8 +3727,8 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
   // ── Filtered + sorted consumables ──────────────────────────────────────────
   const filteredConsumables = useMemo(() => {
     let result = [...consumableProducts];
-    if (cSearch)            result = result.filter(p => p.product_name.toLowerCase().includes(cSearch.toLowerCase()));
-    if (cFilter === 'out')  result = result.filter(p => p.balance.in_stock <= 0);
+    if (cSearch)               result = result.filter(p => p.product_name.toLowerCase().includes(cSearch.toLowerCase()));
+    if (cFilter === 'out')     result = result.filter(p => p.balance.in_stock <= 0);
     else if (cFilter === 'low') result = result.filter(p => p.balance.in_stock > 0 && p.balance.in_stock <= 10);
     result = result.filter(p => passesToolbarDTF(p.history, cDTF));
     if (cGroup === 'driver' && cDriverFilter) {
@@ -2581,7 +3825,7 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
   const toggleCExpanded = (id: string) => setCExpanded(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // ── Render ─────────────────────────────────────────────────────────────────
-const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+  const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     layout === 'manager'
       ? <ManagerLayout title="Store" subtitle="Daily stock operations">{children}</ManagerLayout>
       : <DashboardLayout title="Store" subtitle="Daily stock operations">{children}</DashboardLayout>;
@@ -2604,6 +3848,10 @@ const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <TabsTrigger value="consumables" className="gap-2">
                 <Package className="h-4 w-4" />Consumables
                 {consumableProducts.length > 0 && <Badge variant="secondary" className="ml-1 text-xs py-0 h-4">{consumableProducts.length}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="driver-stock" className="gap-2">
+                <Users className="h-4 w-4" />Driver Stock
+                {driverVanStock.length > 0 && <Badge variant="secondary" className="ml-1 text-xs py-0 h-4">{driverVanStock.length}</Badge>}
               </TabsTrigger>
             </TabsList>
             <Button variant="ghost" size="icon" onClick={load} className="h-9 w-9"><RefreshCw className="h-4 w-4" /></Button>
@@ -2779,6 +4027,17 @@ const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </>
             )}
           </TabsContent>
+
+          {/* ══ DRIVER STOCK TAB — ENHANCED ══ */}
+          <TabsContent value="driver-stock" className="space-y-4 mt-0">
+            <DriverVanStockTab
+              drivers={driverVanStock}
+              search={dvSearch}
+              onSearch={setDvSearch}
+              onRefresh={load}
+            />
+          </TabsContent>
+
         </Tabs>
       )}
 

@@ -162,3 +162,49 @@ export interface DirectSalesReport {
     revenue: number;
   }[];
 }
+
+
+export interface PaymentReportCustomer {
+  customerId:       string;
+  fullName:         string;
+  phone:            string;
+  isCredit:         boolean;
+  creditLimit:      number;
+  availableCredit:  number;
+  totalInvoiced:    number;
+  totalPaid:        number;
+  totalOutstanding: number;
+  invoiceCount:     number;
+  unpaidCount:      number;
+  overdueCount:     number;
+  paymentBreakdown: Record<string, number>; // e.g. { CASH: 1200, MPESA: 800 }
+  ordersNoInvoice:  {
+    order_number:   string;
+    total_amount:   number;
+    payment_status: string;
+    created_at:     string;
+  }[];
+}
+ 
+export interface PaymentReportSummary {
+  totalCustomers:          number;
+  creditCustomers:         number;
+  nonCreditCustomers:      number;
+  totalInvoiced:           number;
+  totalPaid:               number;
+  totalOutstanding:        number;
+  paymentMethodBreakdown:  Record<string, number>;
+  ordersWithNoInvoice:     number;
+}
+ 
+export interface PaymentReport {
+  generatedAt: string;
+  filters: {
+    customerType: string;
+    status:       string;
+    dateFrom:     string | null;
+    dateTo:       string | null;
+  };
+  summary:   PaymentReportSummary;
+  customers: PaymentReportCustomer[];
+}

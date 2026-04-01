@@ -1,6 +1,6 @@
 // src/pages/auth/LoginPage.tsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { roleDefaultRoutes } from '@/constants/routes';
@@ -11,65 +11,48 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Droplets, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-/**
- * Extracts a human-readable error message from any error thrown during login.
- * Handles Axios HTTP errors (with Django REST Framework error shapes),
- * plain Error objects, and unknown values.
- */
 function getLoginErrorMessage(error: unknown): string {
-  // Axios error — read the backend response body
   if (isAxiosError(error)) {
     const data = error.response?.data;
 
     if (data) {
-      // DRF non-field validation errors: { "non_field_errors": ["..."] }
       if (Array.isArray(data.non_field_errors) && data.non_field_errors.length > 0) {
         return data.non_field_errors[0] as string;
       }
-
-      // DRF detail string: { "detail": "..." }
       if (typeof data.detail === 'string') {
         return data.detail;
       }
-
-      // DRF field errors — join the first message from each field
-      // e.g. { "email": ["This field is required."] }
       const fieldMessages = Object.values(data)
         .flatMap((v) => (Array.isArray(v) ? v : [v]))
         .filter((v): v is string => typeof v === 'string');
-
       if (fieldMessages.length > 0) {
         return fieldMessages[0];
       }
     }
 
-    // Fallback to the HTTP status text
     if (error.response?.statusText) {
       return error.response.statusText;
     }
 
-    // Network error (no response at all)
     return 'Unable to reach the server. Please check your connection.';
   }
 
-  // Standard JS Error
   if (error instanceof Error) {
     return error.message;
   }
 
-  // Completely unknown
   return 'An unexpected error occurred. Please try again.';
 }
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email,        setEmail]        = useState('');
+  const [password,     setPassword]     = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading,    setIsLoading]    = useState(false);
 
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const { login }  = useAuth();
+  const navigate   = useNavigate();
+  const { toast }  = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,45 +61,31 @@ export const LoginPage: React.FC = () => {
     try {
       await login({ email, password });
 
-      // Get user from localStorage after login
       const storedUser = localStorage.getItem('aquatrack_user');
       if (storedUser) {
         const user = JSON.parse(storedUser) as { role: keyof typeof roleDefaultRoutes };
-        const redirectPath = roleDefaultRoutes[user.role];
-        navigate(redirectPath);
+        navigate(roleDefaultRoutes[user.role]);
       }
     } catch (error: unknown) {
       toast({
-        title: 'Login Failed',
+        title:       'Login Failed',
         description: getLoginErrorMessage(error),
-        variant: 'destructive',
+        variant:     'destructive',
       });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const demoAccounts = [
-    { role: 'Super Admin', email: 'admin@aquatrack.com', password: 'admin123' },
-    { role: 'Client Admin', email: 'client@aquatrack.com', password: 'client123' },
-    { role: 'Site Manager', email: 'manager@aquatrack.com', password: 'manager123' },
-    { role: 'Driver', email: 'driver@aquatrack.com', password: 'driver123' },
-  ];
-
-  const fillDemoCredentials = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-  };
-
   return (
     <div className="min-h-screen flex">
-      {/* Left side - Branding */}
+
+      {/* ── Left side — Branding ── */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-ocean relative overflow-hidden">
-        {/* Decorative waves */}
         <div className="absolute inset-0 opacity-20">
           <div className="absolute top-1/4 left-0 w-[200%] h-48 bg-white/10 rounded-full animate-water-wave" />
           <div className="absolute top-1/2 left-0 w-[200%] h-32 bg-white/10 rounded-full animate-water-wave" style={{ animationDelay: '2s' }} />
-          <div className="absolute top-3/4 left-0 w-[200%] h-24 bg-white/5 rounded-full animate-water-wave" style={{ animationDelay: '4s' }} />
+          <div className="absolute top-3/4 left-0 w-[200%] h-24 bg-white/5  rounded-full animate-water-wave" style={{ animationDelay: '4s' }} />
         </div>
 
         <div className="relative z-10 flex flex-col justify-center p-12 text-white">
@@ -153,9 +122,10 @@ export const LoginPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right side - Login form */}
+      {/* ── Right side — Login form ── */}
       <div className="flex-1 flex items-center justify-center p-8 bg-gradient-surface">
         <div className="w-full max-w-md space-y-8">
+
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
             <div className="p-3 rounded-xl bg-gradient-ocean shadow-glow">
@@ -171,8 +141,10 @@ export const LoginPage: React.FC = () => {
                 Enter your credentials to access your account
               </CardDescription>
             </CardHeader>
+
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <div className="relative">
@@ -182,7 +154,7 @@ export const LoginPage: React.FC = () => {
                       type="email"
                       placeholder="name@company.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={e => setEmail(e.target.value)}
                       className="pl-10"
                       required
                     />
@@ -198,20 +170,18 @@ export const LoginPage: React.FC = () => {
                       type={showPassword ? 'text' : 'password'}
                       placeholder="••••••••"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={e => setPassword(e.target.value)}
                       className="pl-10 pr-10"
                       required
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowPassword(v => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
+                      {showPassword
+                        ? <EyeOff className="h-4 w-4" />
+                        : <Eye    className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
@@ -221,9 +191,14 @@ export const LoginPage: React.FC = () => {
                     <input type="checkbox" className="rounded border-input" />
                     <span className="text-muted-foreground">Remember me</span>
                   </label>
-                  <a href="#" className="text-primary hover:underline font-medium">
+
+                  {/* ── Forgot password → dedicated page ── */}
+                  <Link
+                    to="/forgot-password"
+                    className="text-primary hover:underline font-medium"
+                  >
                     Forgot password?
-                  </a>
+                  </Link>
                 </div>
 
                 <Button
@@ -244,34 +219,11 @@ export const LoginPage: React.FC = () => {
                     </span>
                   )}
                 </Button>
+
               </form>
             </CardContent>
           </Card>
 
-          {/* Demo accounts */}
-          <Card className="border-dashed border-2 bg-muted/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Demo Accounts
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-2 gap-2">
-                {demoAccounts.map((account) => (
-                  <button
-                    key={account.email}
-                    onClick={() => fillDemoCredentials(account.email, account.password)}
-                    className="text-left p-2 rounded-lg hover:bg-secondary transition-colors text-sm"
-                  >
-                    <div className="font-medium text-foreground">{account.role}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {account.email}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

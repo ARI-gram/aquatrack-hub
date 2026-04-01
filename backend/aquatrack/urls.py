@@ -64,6 +64,12 @@ urlpatterns = [
 
     # Reports  →  /api/reports/revenue/  /api/reports/vat/  /api/reports/outstanding/
     path('api/reports/', include('apps.reports.urls')),
+
+    # Misc utilities    →  /api/deliveries/health/
+    path('api/deliveries/', include('apps.deliveries.urls')),
+
+    # Site manager      →  /api/manager/drivers/
+    path('api/manager/',    include('apps.deliveries.manager_urls')),
 ]
 
 if settings.DEBUG:

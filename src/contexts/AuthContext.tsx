@@ -1,6 +1,7 @@
+// /src/contexts/AuthContext.tsx
 import React, {
   createContext, useContext, useState,
-  useCallback, useEffect, useRef,
+  useCallback, useEffect,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -13,6 +14,7 @@ import { CUSTOMER_ROUTES } from '@/constants/customerRoutes';
 // ─── Extended context type ────────────────────────────────────────────────────
 interface ExtendedAuthContextType extends AuthContextType {
   loginAsCustomer: (user: User, token: string, refreshToken: string) => void;
+  refreshUser:     () => Promise<void>;   // ← NEW
 }
 
 const AuthContext = createContext<ExtendedAuthContextType | undefined>(undefined);
@@ -21,7 +23,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user,      setUser]      = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // useNavigate is available here because AuthProvider is now inside BrowserRouter
   const navigate = useNavigate();
 
   // ── Restore session on mount ──────────────────────────────────────────────
@@ -39,9 +40,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ── Listen for session-expired events from axios interceptor ─────────────
-  // The interceptor fires window.dispatchEvent('aquatrack:session-expired')
-  // instead of window.location.href so we can navigate cleanly without a
-  // hard reload that wipes React state and causes the login flash.
   useEffect(() => {
     const handleExpired = (e: Event) => {
       const { isCustomer } = (e as CustomEvent<{ isCustomer: boolean }>).detail;
@@ -79,9 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ── Customer OTP login ────────────────────────────────────────────────────
-  // Sets state and localStorage synchronously so that the useEffect in
-  // CustomerLoginPage that watches `user` fires on the next render with a
-  // valid user — no navigate() race condition.
   const loginAsCustomer = useCallback((
     customerUser: User,
     token: string,
@@ -110,6 +105,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user, navigate]);
 
+  // ── Refresh user ──────────────────────────────────────────────────────────
+  // Called after a forced password change so the new must_change_password=false
+  // value flows into context and closes the modal automatically.
+  const refreshUser = useCallback(async () => {
+    try {
+      const updated = await authService.getCurrentUser();
+      localStorage.setItem('aquatrack_user', JSON.stringify(updated));
+      setUser(updated);
+    } catch {
+      // if refresh fails, leave existing user state intact
+    }
+  }, []);
+
   const hasPermission = useCallback((requiredRole: UserRole | UserRole[]) => {
     if (!user) return false;
     const roles     = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
@@ -127,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginAsCustomer,
         logout,
         hasPermission,
+        refreshUser,    // ← NEW
       }}
     >
       {children}

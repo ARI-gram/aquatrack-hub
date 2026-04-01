@@ -9,6 +9,7 @@ import type {
   Invoice,
   DirectSaleReceipt,
   PaymentMethod,
+  PaymentReport,
 } from '@/types/accounting.types';
 
 // ── Accounting Settings ───────────────────────────────────────────────────────
@@ -92,6 +93,17 @@ export const accountingService = {
   getCustomerInvoices: async (customerId: string): Promise<Invoice[]> => {
     const { data } = await axiosInstance.get(`/customers/${customerId}/invoices/`);
     return data;
+  },
+
+   // GET /api/invoices/payment-report/
+  getPaymentReport: async (params?: {
+    customer_type?: 'credit' | 'non_credit' | 'all';
+    status?:        'paid' | 'unpaid' | 'overdue' | 'all';
+    date_from?:     string;   // 'yyyy-MM-dd'
+    date_to?:       string;   // 'yyyy-MM-dd'
+  }): Promise<PaymentReport> => {
+    const { data } = await axiosInstance.get('/invoices/payment-report/', { params });
+    return data as PaymentReport;
   },
 
   // ── Direct Sale Receipt ─────────────────────────────────────────────────────
