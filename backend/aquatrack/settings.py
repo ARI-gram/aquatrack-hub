@@ -157,8 +157,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
-    # Add production domains here when ready
-    # "https://yourdomain.com",
+    config('FRONTEND_URL', default='http://localhost:8080'),
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
