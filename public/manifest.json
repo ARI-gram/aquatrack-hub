@@ -1,9 +1,8 @@
 {
-  "name": "AquaTrack Staff",
+  "name": "AquaTrack",
   "short_name": "AquaTrack",
-  "description": "Water Distribution Management — Staff Portal",
-  "start_url": "/login",
-  "scope": "/",
+  "description": "Water Distribution Management",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#031d40",
   "theme_color": "#0f3460",
@@ -29,14 +28,14 @@
   "shortcuts": [
     {
       "name": "Staff Login",
-      "short_name": "Login",
+      "short_name": "Staff",
       "url": "/login",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Dashboard",
-      "short_name": "Dashboard",
-      "url": "/dashboard",
+      "name": "Customer Portal",
+      "short_name": "Customer",
+      "url": "/customer/login",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
