@@ -25,6 +25,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'anymail',
+    'apps.authentication',
+
 
     # Third-party apps
     'rest_framework',
@@ -203,5 +206,11 @@ SIMPLE_JWT = {
 }
 
 # Email Configuration
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL', default='ari.gram.technologies@gmail.com')
+
+ANYMAIL = {
+    "BREVO_API_KEY": config('BREVO_API_KEY', default=''),
+}
