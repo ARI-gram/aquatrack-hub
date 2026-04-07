@@ -27,7 +27,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'anymail',
 
-
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
@@ -84,11 +83,6 @@ TEMPLATES = [
 WSGI_APPLICATION = 'aquatrack.wsgi.application'
 
 # Database
-# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
-
-# For now, we'll use SQLite for easy setup
-# Later we can switch to PostgreSQL
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -144,22 +138,21 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom User Model
 AUTH_USER_MODEL = 'authentication.User'
-"""
+
+# ---------------------------------------------------------------
 # CORS Settings
+# ---------------------------------------------------------------
+_frontend_url = config('FRONTEND_URL', default='http://localhost:8080')
+
 CORS_ALLOWED_ORIGINS = [
+    # pulled from env var (e.g. https://aqua-tracker-hub.netlify.app)
+    _frontend_url,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
     "http://localhost:8081",
-]
-CORS_ALLOW_CREDENTIALS = True
-
-"""
-
-# CORS Settings
-CORS_ALLOWED_ORIGINS = [
-    config('FRONTEND_URL', default='http://localhost:8080'),
+    "http://127.0.0.1:8081",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -169,10 +162,24 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-# Frontend URL
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8080')
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
 
+# Frontend URL
+FRONTEND_URL = _frontend_url
+
+# ---------------------------------------------------------------
 # Django REST Framework
+# ---------------------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -189,12 +196,13 @@ REST_FRAMEWORK = {
     ],
     'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%S.%fZ',
     'DATETIME_INPUT_FORMATS': ['%Y-%m-%dT%H:%M:%S.%fZ', 'iso-8601'],
-
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
 
+# ---------------------------------------------------------------
 # Simple JWT Settings
+# ---------------------------------------------------------------
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=config('JWT_ACCESS_TOKEN_LIFETIME_HOURS', default=1, cast=int)),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=config('JWT_REFRESH_TOKEN_LIFETIME_DAYS', default=7, cast=int)),
@@ -204,7 +212,9 @@ SIMPLE_JWT = {
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
 }
 
+# ---------------------------------------------------------------
 # Email Configuration
+# ---------------------------------------------------------------
 EMAIL_BACKEND = config(
     'EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 DEFAULT_FROM_EMAIL = config(
