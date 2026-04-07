@@ -17,11 +17,18 @@ if (iosTitleMeta) {
 }
 
 // ── PWA Service Worker ──
+// Staff get /sw.js  (scope: /)
+// Customers get /customer-sw.js  (scope: /customer/)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
+    const swPath  = isCustomerPortal ? '/customer-sw.js' : '/sw.js';
+    const swScope = isCustomerPortal ? '/customer/'      : '/';
+
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      console.log('✅ AquaTrack SW registered');
+      const registration = await navigator.serviceWorker.register(swPath, {
+        scope: swScope,
+      });
+      console.log('✅ AquaTrack SW registered:', swPath);
 
       // Force the waiting SW to activate immediately (no need to close all tabs)
       if (registration.waiting) {

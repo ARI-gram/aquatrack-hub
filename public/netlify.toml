@@ -1,4 +1,30 @@
+# netlify.toml — place this at the root of your project
+
+# ── SPA routing: all paths serve index.html ──
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ── Service workers must never be cached by the browser ──
+# Without this, users keep running old SW for up to 24 hours after deploy
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/customer-sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# ── Manifests should also update promptly ──
+[[headers]]
+  for = "/manifest-staff.json"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest-customer.json"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

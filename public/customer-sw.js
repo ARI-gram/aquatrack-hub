@@ -1,19 +1,16 @@
-// ── Cache names — bump version to force refresh ──
-const STATIC_CACHE = 'aquatrack-static-v1';
-const DYNAMIC_CACHE = 'aquatrack-dynamic-v1';
-const API_CACHE = 'aquatrack-api-v1';
+// ── Customer SW — scoped to /customer/ only ──
+const STATIC_CACHE = 'mywater-static-v1';
+const DYNAMIC_CACHE = 'mywater-dynamic-v1';
+const API_CACHE = 'mywater-api-v1';
 
-// Pre-cache these on install — the app shell
 const PRECACHE_ASSETS = [
-  '/',
-  '/login',
-  '/manifest-staff.json',
+  '/customer/login',
+  '/manifest-customer.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/favicon.ico',
 ];
 
-// ── Install: pre-cache the app shell immediately ──
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(STATIC_CACHE)
@@ -22,7 +19,6 @@ self.addEventListener('install', e => {
   );
 });
 
-// ── Activate: clean up old caches ──
 self.addEventListener('activate', e => {
   const CURRENT_CACHES = [STATIC_CACHE, DYNAMIC_CACHE, API_CACHE];
   e.waitUntil(
@@ -32,7 +28,7 @@ self.addEventListener('activate', e => {
           keys
             .filter(k => !CURRENT_CACHES.includes(k))
             .map(k => {
-              console.log('[SW] Deleting old cache:', k);
+              console.log('[Customer SW] Deleting old cache:', k);
               return caches.delete(k);
             })
         )
@@ -41,38 +37,30 @@ self.addEventListener('activate', e => {
   );
 });
 
-// ── Listen for SKIP_WAITING message from main.tsx ──
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// ── Fetch: route by request type ──
 self.addEventListener('fetch', e => {
   const { request } = e;
   const url = new URL(request.url);
 
-  // Skip non-GET and browser-extension requests
   if (request.method !== 'GET' || !url.protocol.startsWith('http')) return;
 
-  // 1. API calls → network first, short timeout, fallback to cache
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(networkFirstWithTimeout(request, API_CACHE, 4000));
     return;
   }
 
-  // 2. Static assets (JS, CSS, fonts, images) → cache first
   if (isStaticAsset(url)) {
     e.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
 
-  // 3. HTML navigation → stale-while-revalidate
   e.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
 });
-
-// ── Strategies ──
 
 async function cacheFirst(request, cacheName) {
   const cached = await caches.match(request);
@@ -99,11 +87,10 @@ async function staleWhileRevalidate(request, cacheName) {
       if (response.ok) cache.put(request, response.clone());
       return response;
     })
-    .catch(() => null); // network failed → null, we fall back to cached
+    .catch(() => null);
 
   const result = cached || await fetchPromise;
 
-  // Always return a real Response — never undefined
   return result || new Response('Offline', { status: 503 });
 }
 
