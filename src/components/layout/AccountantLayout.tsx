@@ -2,13 +2,15 @@
  * AccountantLayout
  * src/components/layout/AccountantLayout.tsx
  *
- * Clean, professional layout for the accountant role.
- * - Desktop: fixed left sidebar with accounts-focused nav
- * - Mobile: top bar + bottom nav (scrollable for all 6 items)
- * - Theme accent: violet (matches accountant role color)
+ * Changes in this revision:
+ *  - Mobile sidebar is now a left-side drawer (translate-based), matching AppSidebar pattern
+ *  - Bottom nav shows primary 4 items; "More" button opens the left drawer
+ *  - Horizontal-scroll bottom nav removed in favour of drawer overflow
+ *  - mobileOpen state lifted into AccountantLayout (no internal sidebar state)
+ *  - Desktop sidebar, all nav routes, isActive(), header, and page content unchanged
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,7 +18,7 @@ import { ROUTES } from '@/constants/routes';
 import {
   FileText, TrendingUp, Settings, LogOut, Users,
   Droplets, ChevronLeft, Calculator,
-  ShoppingBag, LayoutDashboard,
+  ShoppingBag, LayoutDashboard, MoreHorizontal, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -74,6 +76,8 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+const MOBILE_PRIMARY_COUNT = 4;
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface AccountantLayoutProps {
@@ -96,9 +100,8 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
   const { user, logout } = useAuth();
   const location         = useLocation();
   const navigate         = useNavigate();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Dashboard is active only when exactly on /client/accounts/dashboard,
-  // NOT when on /client/accounts/dashboard/... (no children, but being safe)
   const isActive = (path: string) => {
     if (path === ROUTES.ACCOUNTANT.DASHBOARD) {
       return location.pathname === path;
@@ -110,8 +113,21 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Accountant';
   const handleBack  = () => { if (onBack) onBack(); else navigate(-1); };
 
+  const primaryItems     = NAV_ITEMS.slice(0, MOBILE_PRIMARY_COUNT);
+  const overflowItems    = NAV_ITEMS.slice(MOBILE_PRIMARY_COUNT);
+  const hasOverflow      = overflowItems.length > 0;
+  const overflowIsActive = overflowItems.some(item => isActive(item.path));
+
   return (
     <div className="min-h-screen bg-background flex">
+
+      {/* ─── Mobile backdrop overlay ──────────────────────────────────── */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
 
       {/* ─── Desktop Sidebar ──────────────────────────────────────────── */}
       <aside className="hidden lg:flex lg:flex-col lg:w-72 lg:fixed lg:inset-y-0 border-r border-border bg-card z-30">
@@ -205,6 +221,105 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
           <button
             onClick={logout}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive transition-colors group"
+          >
+            <div className="h-8 w-8 rounded-lg bg-muted/50 group-hover:bg-destructive/10 flex items-center justify-center shrink-0 transition-colors">
+              <LogOut className="h-4 w-4" />
+            </div>
+            Sign Out
+          </button>
+        </div>
+      </aside>
+
+      {/* ─── Mobile left drawer sidebar ───────────────────────────────── */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 z-40 h-screen flex flex-col lg:hidden',
+          'bg-card border-r border-border w-72',
+          'transition-all duration-300 ease-in-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        {/* Drawer header */}
+        <div className="flex h-14 items-center justify-between px-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-ocean shadow-glow shrink-0">
+              <Droplets className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-sm font-bold">AquaTrack</span>
+              <p className="text-[10px] text-violet-500 font-semibold uppercase tracking-widest -mt-0.5">
+                Accounts
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileOpen(false)}
+            className="h-8 w-8 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Drawer nav — all items */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+          {NAV_ITEMS.map(item => {
+            const active = isActive(item.path);
+            const Icon   = item.icon;
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 group',
+                  active
+                    ? 'bg-violet-600 text-white shadow-md shadow-violet-600/25'
+                    : 'text-muted-foreground hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/30 dark:hover:text-violet-300',
+                )}
+              >
+                <div className={cn(
+                  'h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors',
+                  active
+                    ? 'bg-white/20'
+                    : 'bg-muted/50 group-hover:bg-violet-100 dark:group-hover:bg-violet-900/40',
+                )}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className={cn('text-sm font-semibold leading-tight', active && 'text-white')}>
+                    {item.label}
+                  </p>
+                  <p className={cn(
+                    'text-[10px] leading-tight mt-0.5',
+                    active ? 'text-white/70' : 'text-muted-foreground/60',
+                  )}>
+                    {item.sublabel}
+                  </p>
+                </div>
+                {active && <div className="h-1.5 w-1.5 rounded-full bg-white/80 shrink-0" />}
+              </NavLink>
+            );
+          })}
+        </nav>
+
+        {/* Drawer footer */}
+        <div className="border-t border-border p-4 shrink-0">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="h-9 w-9 shrink-0 ring-2 ring-violet-300 dark:ring-violet-700">
+              <AvatarFallback className="bg-violet-600 text-white font-bold text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold truncate">{displayName}</p>
+              <p className="text-[11px] text-violet-500 font-semibold">Accountant</p>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive transition-colors group"
           >
             <div className="h-8 w-8 rounded-lg bg-muted/50 group-hover:bg-destructive/10 flex items-center justify-center shrink-0 transition-colors">
               <LogOut className="h-4 w-4" />
@@ -321,32 +436,32 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
         </main>
       </div>
 
-      {/* ─── Mobile Bottom Nav — scrollable so all 6 items fit ───────── */}
+      {/* ─── Mobile bottom nav — primary 4 + More drawer trigger ─────── */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 lg:hidden border-t border-border bg-background/98 backdrop-blur-xl">
         <div
-          className="flex items-stretch overflow-x-auto scrollbar-none"
+          className="flex items-stretch justify-around px-1"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
-          {NAV_ITEMS.map(item => {
+          {primaryItems.map(item => {
             const active = isActive(item.path);
             const Icon   = item.icon;
             return (
               <NavLink
                 key={item.path}
                 to={item.path}
-                className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 pt-2 pb-2.5 min-h-[56px] min-w-[64px]"
+                className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
               >
                 <div className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-2xl transition-all duration-200',
                   active ? 'bg-violet-600/15 scale-110' : 'scale-100',
                 )}>
                   <Icon className={cn(
-                    'h-[20px] w-[20px] transition-colors',
+                    'h-[22px] w-[22px] transition-colors',
                     active ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
                   )} />
                 </div>
                 <span className={cn(
-                  'text-[9px] font-semibold tracking-wide transition-colors whitespace-nowrap',
+                  'text-[10px] font-semibold tracking-wide transition-colors truncate max-w-[52px] text-center',
                   active ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
                 )}>
                   {item.label}
@@ -354,6 +469,30 @@ export const AccountantLayout: React.FC<AccountantLayoutProps> = ({
               </NavLink>
             );
           })}
+
+          {/* More — opens the left drawer */}
+          {hasOverflow && (
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
+            >
+              <div className={cn(
+                'flex items-center justify-center h-8 w-8 rounded-2xl transition-all duration-200',
+                overflowIsActive ? 'bg-violet-600/15 scale-110' : 'scale-100',
+              )}>
+                <MoreHorizontal className={cn(
+                  'h-[22px] w-[22px]',
+                  overflowIsActive ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
+                )} />
+              </div>
+              <span className={cn(
+                'text-[10px] font-semibold tracking-wide',
+                overflowIsActive ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground',
+              )}>
+                More
+              </span>
+            </button>
+          )}
         </div>
       </nav>
 
