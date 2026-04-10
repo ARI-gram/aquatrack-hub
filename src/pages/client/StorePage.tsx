@@ -42,7 +42,7 @@ import {
   ChevronLeft, SlidersHorizontal, Filter, Users,
   ChevronDown, CheckCircle2, AlertTriangle, TrendingDown, TrendingUp,
   AlignJustify, ChevronRight, Phone, Plus, Check, UserCheck, Minus,
-  PackagePlus,
+  PackagePlus, Info
 } from 'lucide-react';
 import { useToast }    from '@/hooks/use-toast';
 import { useAuth }     from '@/contexts/AuthContext';
@@ -769,7 +769,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       {/* ── Row 2: Sort · Group · Stock chips · Actions ───────────────── */}
-      <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
+      <div className="flex items-center gap-2 px-3 py-2 flex-wrap overflow-x-hidden">
 
         {/* Sort */}
         <Select value={sortKey} onValueChange={v => onSort(v as SortKey)}>
@@ -871,7 +871,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* ── Driver picker row ─────────────────────────────────────────── */}
       {groupMode === 'driver' && (
-        <div className="flex items-center gap-3 px-3 py-2.5 border-t border-border/40 bg-violet-500/3">
+        <div className="flex items-start gap-2 px-3 py-2.5 border-t border-border/40 bg-violet-500/3 flex-wrap">
           <div className="flex items-center gap-1.5 text-xs font-medium text-violet-700 shrink-0">
             <Users className="h-3.5 w-3.5" />
             Driver
@@ -3618,11 +3618,14 @@ const OpeningStockDialog: React.FC<{
   onClose: () => void; onSaved: (id: string, b: BottleBalance) => void;
 }> = ({ open, products, onClose, onSaved }) => {
   const { toast } = useToast();
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading]     = useState(false);
   const [productId, setProductId] = useState('');
-  const [qtyFull,  setQtyFull]  = useState('');
-  const [qtyEmpty, setQtyEmpty] = useState('');
-  const [notes,    setNotes]    = useState('');
+  const [qtyFull,  setQtyFull]    = useState('');
+  const [qtyEmpty, setQtyEmpty]   = useState('');
+  const [notes,    setNotes]      = useState('');
+
+  const full  = parseInt(qtyFull)  || 0;
+  const empty = parseInt(qtyEmpty) || 0;
 
   useEffect(() => {
     if (open) { setProductId(''); setQtyFull(''); setQtyEmpty(''); setNotes(''); }
@@ -3630,11 +3633,8 @@ const OpeningStockDialog: React.FC<{
 
   const handleSubmit = async () => {
     if (!productId) return toast({ title: 'Select a product', variant: 'destructive' });
-    const full  = parseInt(qtyFull)  || 0;
-    const empty = parseInt(qtyEmpty) || 0;
     if (full === 0 && empty === 0)
       return toast({ title: 'Enter at least one quantity', variant: 'destructive' });
-
     setLoading(true);
     try {
       const res = await bottleStoreService.openingStock({ product: productId, qty_full: full, qty_empty: empty, notes });
@@ -3659,33 +3659,41 @@ const OpeningStockDialog: React.FC<{
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-sm max-h-[90dvh] overflow-y-auto">
-        <div className="bg-gradient-to-br from-teal-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-5 border-b border-border/60">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-teal-500/10 text-teal-600 border border-teal-500/20">
-              <PackagePlus className="h-5 w-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-base font-semibold">Opening Stock</DialogTitle>
-              <DialogDescription className="text-xs mt-0">
-                Load initial stock — use for onboarding or supplier restock
-              </DialogDescription>
-            </div>
+      <DialogContent className="w-full max-w-md mx-auto max-h-[92dvh] overflow-y-auto p-0 gap-0 rounded-2xl">
+
+        {/* ── Header ── */}
+        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-border/60 bg-muted/30">
+          <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-teal-500/10 text-teal-600 border border-teal-500/20 shrink-0">
+            <PackagePlus className="h-5 w-5" />
+          </div>
+          <div>
+            <DialogTitle className="text-base font-semibold leading-tight">Opening Stock</DialogTitle>
+            <DialogDescription className="text-xs mt-0.5">
+              Load initial stock — first-time setup or supplier restock
+            </DialogDescription>
           </div>
         </div>
 
-        <div className="rounded-xl bg-teal-500/8 border border-teal-500/20 px-3 py-2.5 mb-2 text-xs text-teal-700 dark:text-teal-300">
-          Use this when you have physical stock that isn't in the system yet — 
-          first-time setup, or bottles arriving directly from a supplier.
+        {/* ── Info banner ── */}
+        <div className="flex items-start gap-2.5 px-5 py-3 bg-teal-500/5 border-b border-teal-500/15">
+          <Info className="h-3.5 w-3.5 text-teal-600 shrink-0 mt-0.5" />
+          <p className="text-xs text-teal-700 dark:text-teal-300 leading-relaxed">
+            Use this when you have physical stock not yet in the system — first-time setup or bottles arriving directly from a supplier.
+          </p>
         </div>
 
-        <div className="space-y-4">
-          <Field label="Product" required>
+        <div className="px-5 py-5 space-y-5">
+
+          {/* ── Product select ── */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Product <span className="text-destructive">*</span>
+            </label>
             <Select value={productId} onValueChange={setProductId}>
-              <SelectTrigger className="h-11">
+              <SelectTrigger className="h-11 w-full">
                 <ProductSelectTrigger selectedId={productId} products={productOptions} placeholder="Select bottle product…" />
               </SelectTrigger>
-              <SelectContent className="max-h-64">
+              <SelectContent className="max-h-60">
                 {productOptions.map(p => (
                   <SelectItem key={p.id} value={p.id} className="py-1.5">
                     <ProductDropdownItem name={p.name} unit={p.unit} imageUrl={p.imageUrl} />
@@ -3693,28 +3701,79 @@ const OpeningStockDialog: React.FC<{
                 ))}
               </SelectContent>
             </Select>
-          </Field>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Full bottles" hint="Ready to distribute">
-              <Input type="number" min={0} placeholder="0" value={qtyFull}  onChange={e => setQtyFull(e.target.value)}  />
-            </Field>
-            <Field label="Empty bottles" hint="In warehouse">
-              <Input type="number" min={0} placeholder="0" value={qtyEmpty} onChange={e => setQtyEmpty(e.target.value)} />
-            </Field>
           </div>
 
-          <Field label="Notes" hint="e.g. Initial setup, Supplier restock from XYZ">
-            <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
-          </Field>
-        </div>
+          {/* ── Qty inputs ── */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Full bottles</label>
+              <Input
+                type="number" min={0} placeholder="0"
+                value={qtyFull}
+                onChange={e => setQtyFull(e.target.value)}
+                className="h-11 text-base tabular-nums"
+              />
+              <p className="text-xs text-muted-foreground">Ready to distribute</p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Empty bottles</label>
+              <Input
+                type="number" min={0} placeholder="0"
+                value={qtyEmpty}
+                onChange={e => setQtyEmpty(e.target.value)}
+                className="h-11 text-base tabular-nums"
+              />
+              <p className="text-xs text-muted-foreground">In warehouse</p>
+            </div>
+          </div>
 
-        <div className="flex gap-3 mt-6">
-          <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <PackagePlus className="h-4 w-4 mr-2" />}
-            Load Stock
-          </Button>
+          {/* ── Live summary ── */}
+          {(full > 0 || empty > 0) && (
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'Full',    value: full,         color: 'text-emerald-600', bg: 'bg-emerald-500/8' },
+                { label: 'Empty',   value: empty,        color: 'text-amber-600',   bg: 'bg-amber-500/8'   },
+                { label: 'Total',   value: full + empty, color: 'text-teal-600',    bg: 'bg-teal-500/8'    },
+              ].map(s => (
+                <div key={s.label} className={cn('rounded-xl px-3 py-2.5 flex flex-col items-center gap-0.5', s.bg)}>
+                  <span className={cn('text-xl font-bold tabular-nums', s.color)}>{s.value}</span>
+                  <span className="text-[11px] text-muted-foreground">{s.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Notes ── */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <Textarea
+              rows={2}
+              className="resize-none text-sm"
+              placeholder="e.g. Initial setup, Supplier restock from XYZ…"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+            />
+          </div>
+
+          {/* ── Actions ── */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <Button variant="outline" className="h-11" onClick={onClose} disabled={loading}>
+              Cancel
+            </Button>
+            <Button
+              variant="ocean"
+              className="h-11"
+              onClick={handleSubmit}
+              disabled={loading || (!full && !empty) || !productId}
+            >
+              {loading
+                ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                : <PackagePlus className="h-4 w-4 mr-2" />
+              }
+              Load stock
+            </Button>
+          </div>
+
         </div>
       </DialogContent>
     </Dialog>
@@ -3949,18 +4008,35 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
         <Tabs defaultValue="bottles" className="space-y-5">
 
           <div className="flex items-center justify-between gap-4">
-            <TabsList>
-              <TabsTrigger value="bottles" className="gap-2">
-                <Droplets className="h-4 w-4" />Bottles
-                {bottleProducts.length > 0 && <Badge variant="secondary" className="ml-1 text-xs py-0 h-4">{bottleProducts.length}</Badge>}
+            <TabsList className="w-full sm:w-auto">
+              <TabsTrigger value="bottles" className="flex-1 sm:flex-none gap-1.5 text-xs sm:text-sm">
+                <Droplets className="h-3.5 w-3.5 shrink-0" />
+                <span>Bottles</span>
+                {bottleProducts.length > 0 && (
+                  <Badge variant="secondary" className="ml-0.5 text-[10px] py-0 h-4 hidden sm:inline-flex">
+                    {bottleProducts.length}
+                  </Badge>
+                )}
               </TabsTrigger>
-              <TabsTrigger value="consumables" className="gap-2">
-                <Package className="h-4 w-4" />Consumables
-                {consumableProducts.length > 0 && <Badge variant="secondary" className="ml-1 text-xs py-0 h-4">{consumableProducts.length}</Badge>}
+              <TabsTrigger value="consumables" className="flex-1 sm:flex-none gap-1.5 text-xs sm:text-sm">
+                <Package className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xs:inline">Consumables</span>
+                <span className="xs:hidden">Stock</span>
+                {consumableProducts.length > 0 && (
+                  <Badge variant="secondary" className="ml-0.5 text-[10px] py-0 h-4 hidden sm:inline-flex">
+                    {consumableProducts.length}
+                  </Badge>
+                )}
               </TabsTrigger>
-              <TabsTrigger value="driver-stock" className="gap-2">
-                <Users className="h-4 w-4" />Driver Stock
-                {driverVanStock.length > 0 && <Badge variant="secondary" className="ml-1 text-xs py-0 h-4">{driverVanStock.length}</Badge>}
+              <TabsTrigger value="driver-stock" className="flex-1 sm:flex-none gap-1.5 text-xs sm:text-sm">
+                <Users className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xs:inline">Driver Stock</span>
+                <span className="xs:hidden">Drivers</span>
+                {driverVanStock.length > 0 && (
+                  <Badge variant="secondary" className="ml-0.5 text-[10px] py-0 h-4 hidden sm:inline-flex">
+                    {driverVanStock.length}
+                  </Badge>
+                )}
               </TabsTrigger>
             </TabsList>
             <Button variant="ghost" size="icon" onClick={load} className="h-9 w-9"><RefreshCw className="h-4 w-4" /></Button>
@@ -3968,7 +4044,7 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
 
           {/* ══ BOTTLES TAB ══ */}
           <TabsContent value="bottles" className="space-y-4 mt-0">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
               {[
                 { label: 'Opening Stock', icon:   <PackagePlus     className="h-4 w-4" />, color: 'text-teal-600', bg: 'hover:bg-teal-500/5 hover:border-teal-500/20', onClick: () => setBottleDialog('opening-stock') },
                 { label: 'Receive Empties', icon: <ArrowDownToLine className="h-4 w-4" />, color: 'text-blue-600',    bg: 'hover:bg-blue-500/5 hover:border-blue-500/20',       onClick: () => setBottleDialog('receive')    },
