@@ -52,6 +52,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     # CORS - must be before CommonMiddleware
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -91,6 +92,8 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD', default=''),
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
+        'CONN_MAX_AGE': 60,
+        'CONN_HEALTH_CHECKS': True,
         'OPTIONS': {
             'sslmode': 'require',
         },
@@ -223,3 +226,5 @@ DEFAULT_FROM_EMAIL = config(
 ANYMAIL = {
     "BREVO_API_KEY": config('BREVO_API_KEY', default=''),
 }
+
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
