@@ -739,9 +739,23 @@ class DriverCompleteDeliveryView(APIView):
     Accepts a delivery in ANY active status and auto-advances it to
     COMPLETED, stamping intermediate timestamps along the way.
 
-    On success, deducts delivered items from van stock and sends
-    notifications to the customer and client admin.
+    New fields in request body
+    --------------------------
+    delivered_items : list of { order_item_id, qty_delivered }
+        Per-item quantities actually handed to the customer.
+        When any item's qty_delivered < ordered quantity the system:
+          • Deducts the shortfall × unit_price from the invoice
+          • Reduces Order.total_amount to match
+          • Writes a structured note on Invoice.notes
+          • Creates an OrderTimeline entry explaining each line
+          • Includes a `delivery_adjustment` block in the response
+
+    Legacy behaviour (no delivered_items supplied)
+    -----------------------------------------------
+    Falls back to the old bottles_delivered / bottles_collected totals.
+    Backward-compatible with older app versions.
     """
+
     permission_classes = [IsDriver]
 
     _ADVANCE = {
@@ -759,14 +773,18 @@ class DriverCompleteDeliveryView(APIView):
                 'order', 'order__bottle_exchange', 'otp',
             ).get(id=delivery_id, driver=request.user)
         except Delivery.DoesNotExist:
-            return Response({'error': 'Delivery not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'error': 'Delivery not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if delivery.status in ('COMPLETED', 'FAILED', 'REJECTED'):
             return Response(
                 {'error': f'Delivery is already {delivery.status}.'},
-                status=status.HTTP_400_BAD_REQUEST)
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Auto-advance to IN_PROGRESS
+        # ── Auto-advance to IN_PROGRESS ───────────────────────────────────────
         now = timezone.now()
         while delivery.status != 'IN_PROGRESS':
             step = self._ADVANCE.get(delivery.status)
@@ -778,24 +796,29 @@ class DriverCompleteDeliveryView(APIView):
             delivery.status = next_status
         delivery.save()
 
-        # REPLACE WITH:
+        # ── OTP gate ──────────────────────────────────────────────────────────
         order_requires_otp = getattr(delivery.order, 'require_otp', True)
         if order_requires_otp:
             try:
                 if not delivery.otp.is_verified:
                     return Response(
-                        {'error': 'Please verify the customer code first.',
-                            'requires_otp': True},
-                        status=status.HTTP_400_BAD_REQUEST)
+                        {
+                            'error': 'Please verify the customer code first.',
+                            'requires_otp': True,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             except DeliveryOTP.DoesNotExist:
                 pass
-        # If require_otp=False, skip OTP gate entirely — driver completes directly
 
+        # ── Validate completion payload ────────────────────────────────────────
         serializer = DriverCompleteDeliverySerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
+
+        # ── Mark COMPLETED ────────────────────────────────────────────────────
         delivery.status = 'COMPLETED'
         delivery.completed_at = now
         delivery.customer_name_confirmed = data.get(
@@ -812,48 +835,73 @@ class DriverCompleteDeliveryView(APIView):
             delivery.customer_feedback = data['customer_feedback']
         delivery.save()
 
-        if delivery.order.bottle_exchange and data.get('bottles_delivered') is not None:
+        # ── Bottle exchange ───────────────────────────────────────────────────
+        if (
+            delivery.order.bottle_exchange
+            and data.get('bottles_delivered') is not None
+        ):
             exchange = delivery.order.bottle_exchange
             exchange.bottles_delivered = data['bottles_delivered']
             exchange.bottles_collected = data.get('bottles_collected', 0)
             exchange.exchange_confirmed = True
             exchange.save()
 
-            # ✅ Record empties collected at delivery into driver's van stock
-            # This mirrors what DriverRecordStockUseView does for direct sales,
-            # so _compute_bottle_balance() picks them up via RECEIVE_EMPTY movements.
             bottles_collected = data.get('bottles_collected', 0)
             if bottles_collected and bottles_collected > 0:
                 try:
-                    from apps.products.models import BottleMovement, Product
-                    # Find the returnable product from the order items
+                    from apps.products.models import BottleMovement
                     for item in delivery.order.items.select_related('product').all():
                         product = getattr(item, 'product', None)
                         if product and getattr(product, 'is_returnable', False):
-                            bottles_delivered = data.get(
+                            bottles_delivered_count = data.get(
                                 'bottles_delivered', 0)
                             BottleMovement.objects.create(
                                 product=product,
                                 driver=request.user,
                                 movement_type='RECEIVE_EMPTY',
-                                qty_expected=bottles_delivered,
+                                qty_expected=bottles_delivered_count,
                                 qty_good=bottles_collected,
                                 qty_damaged=0,
                                 qty_missing=max(
-                                    0, bottles_delivered - bottles_collected),
+                                    0, bottles_delivered_count - bottles_collected),
                                 notes=(
                                     f'Empties collected on delivery completion '
                                     f'(order {delivery.order.order_number})'
                                 ),
                             )
-                            break  # one product per exchange for now
+                            break
                 except Exception:
                     import logging
                     logging.getLogger(__name__).warning(
-                        'RECEIVE_EMPTY movement failed for delivery %s', delivery_id
-                    )
-                    # non-fatal — delivery is still marked complete
+                        'RECEIVE_EMPTY movement failed for delivery %s', delivery_id)
+
+        # ── Partial delivery adjustment (NEW) ─────────────────────────────────
+        #
+        # Strategy:
+        #   1. If the driver supplied per-item `delivered_items[]`, use those.
+        #   2. Else if legacy `bottles_delivered` < `bottles_to_deliver`, infer
+        #      the shortfall across the first returnable item (old app compat).
+        #   3. Otherwise no adjustment needed.
+        #
+        adjustment_result = None
+        delivered_items = data.get('delivered_items') or []
+
+        if not delivered_items:
+            # ── Legacy fallback: infer from bottle totals ──────────────────
+            delivered_items = _infer_delivered_items_from_totals(
+                delivery.order, data
+            )
+
+        if delivered_items:
+            adjustment_result = apply_partial_delivery_adjustment(
+                delivery=delivery,
+                order=delivery.order,
+                delivered_items=delivered_items,
+            )
+
+        # ── Bottle exchange notification ───────────────────────────────────────
         try:
+            exchange = delivery.order.bottle_exchange
             from apps.notifications import notify as _notify
             _notify.bottle_exchange_completed(
                 delivery=delivery,
@@ -862,8 +910,9 @@ class DriverCompleteDeliveryView(APIView):
                 client=delivery.order.client,
             )
         except Exception:
-            pass  # non-fatal
+            pass
 
+        # ── Stock deduction ───────────────────────────────────────────────────
         try:
             from apps.deliveries.driver_store_views import _deduct_delivery_stock
             _deduct_delivery_stock(request.user, delivery.order)
@@ -872,9 +921,11 @@ class DriverCompleteDeliveryView(APIView):
             logging.getLogger(__name__).warning(
                 'Stock deduction failed after completing delivery %s', delivery_id)
 
-        notify.order_delivered(delivery.order)      # → customer
-        notify.delivery_completed(delivery)         # → client admin
+        # ── Customer / admin notifications ────────────────────────────────────
+        notify.order_delivered(delivery.order)
+        notify.delivery_completed(delivery)
 
+        # ── Payment collection recording ──────────────────────────────────────
         amount_collected = data.get('amount_collected') or Decimal('0.00')
         if amount_collected > Decimal('0.00'):
             try:
@@ -894,7 +945,9 @@ class DriverCompleteDeliveryView(APIView):
                         invoice.amount_paid + collected,
                     )
                     invoice.amount_due = max(
-                        _D('0.00'), invoice.total_amount - invoice.amount_paid)
+                        _D('0.00'),
+                        invoice.total_amount - invoice.amount_paid,
+                    )
                     invoice.payment_method = data.get(
                         'payment_method_collected', 'CASH')
                     if invoice.amount_due == _D('0.00'):
@@ -909,12 +962,95 @@ class DriverCompleteDeliveryView(APIView):
                 import logging
                 logging.getLogger(__name__).warning(
                     'Payment collection recording failed for delivery %s', delivery_id)
-                # non-fatal — delivery is still marked complete
 
-        return Response({
+        # ── Build response ────────────────────────────────────────────────────
+        response_data: dict = {
             'message':      'Delivery completed successfully.',
             'completed_at': delivery.completed_at,
-        })
+        }
+
+        if adjustment_result and adjustment_result.had_shortfall:
+            response_data['delivery_adjustment'] = {
+                'applied':           True,
+                'original_amount':   float(adjustment_result.original_amount),
+                'total_deducted':    float(adjustment_result.total_deducted),
+                'adjusted_amount':   float(adjustment_result.adjusted_amount),
+                'invoice_number':    adjustment_result.invoice_number,
+                'lines': [
+                    {
+                        'product_name':  ln.product_name,
+                        'ordered_qty':   ln.ordered_qty,
+                        'delivered_qty': ln.delivered_qty,
+                        'shortfall_qty': ln.shortfall_qty,
+                        'unit_price':    float(ln.unit_price),
+                        'deducted_amt':  float(ln.deducted_amt),
+                        'reason':        ln.reason,
+                    }
+                    for ln in adjustment_result.lines
+                ],
+            }
+        else:
+            response_data['delivery_adjustment'] = {'applied': False}
+
+        return Response(response_data)
+
+
+# ── Helper: infer delivered_items from legacy bottle totals ───────────────────
+
+def _infer_delivered_items_from_totals(order, data: dict) -> list[dict]:
+    """
+    Old app versions don't send delivered_items[]. They send a single
+    `bottles_delivered` integer for the whole order.
+
+    If bottles_delivered < bottles_to_deliver, we distribute the shortfall
+    proportionally across returnable order items so the adjustment logic
+    can still run.
+
+    Returns an empty list if there is no shortfall (no adjustment needed).
+    """
+    try:
+        exchange = order.bottle_exchange
+        expected = exchange.bottles_to_deliver or 0
+        delivered = data.get('bottles_delivered')
+
+        if delivered is None or delivered >= expected:
+            return []  # no shortfall
+
+        shortfall = expected - delivered
+        items = list(
+            order.items.select_related('product')
+            .filter(product__is_returnable=True)
+            .order_by('id')
+        )
+
+        if not items:
+            return []
+
+        # Distribute shortfall largest-first
+        result = []
+        remaining_shortfall = shortfall
+
+        for item in items:
+            if remaining_shortfall <= 0:
+                result.append({
+                    'order_item_id': str(item.id),
+                    'qty_delivered':  item.quantity,  # fully delivered
+                })
+                continue
+
+            item_shortfall = min(remaining_shortfall, item.quantity)
+            qty_delivered = item.quantity - item_shortfall
+            remaining_shortfall -= item_shortfall
+
+            result.append({
+                'order_item_id': str(item.id),
+                'qty_delivered':  qty_delivered,
+            })
+
+        return result
+
+    except Exception:
+        return []
 
 
 # ─── CLIENT VIEWS ─────────────────────────────────────────────────────────────

@@ -359,14 +359,30 @@ class DriverStatusUpdateSerializer(serializers.Serializer):
         return data
 
 
+class DeliveredItemSerializer(serializers.Serializer):
+    """One row in the per-item delivery confirmation."""
+    order_item_id = serializers.UUIDField()
+    qty_delivered = serializers.IntegerField(min_value=0)
+
+
 class DriverCompleteDeliverySerializer(serializers.Serializer):
     customer_name_confirmed = serializers.CharField(
         required=False, allow_blank=True)
     signature_image = serializers.ImageField(required=False)
     photo_proof = serializers.ImageField(required=False)
     driver_notes = serializers.CharField(required=False, allow_blank=True)
+
+    # ── Per-item delivery confirmation (NEW) ──────────────────────────────────
+    # Each entry: { order_item_id: "<uuid>", qty_delivered: N }
+    # If omitted entirely, the old behaviour (use bottles_delivered / bottles_collected
+    # totals) is preserved for backward compatibility with older app versions.
+    delivered_items = DeliveredItemSerializer(
+        many=True, required=False, default=list)
+
+    # ── Legacy bottle-level totals (kept for backward compat) ─────────────────
     bottles_delivered = serializers.IntegerField(min_value=0, required=False)
     bottles_collected = serializers.IntegerField(min_value=0, required=False)
+
     customer_rating = serializers.IntegerField(
         min_value=1, max_value=5, required=False)
     customer_feedback = serializers.CharField(required=False, allow_blank=True)
