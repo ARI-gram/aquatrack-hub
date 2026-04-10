@@ -2,10 +2,16 @@
  * Client Settings Page
  * Role: Client Admin
  * Route: /client/settings
- * Company settings and configuration
+ *
+ * Changes: Replaced all mock data with real API calls.
+ *  - Company Profile + Business Settings → clientsService.getClientById / updateClient
+ *  - Logo → clientsService.uploadLogo
+ *  - Notifications → settingsService.getClientNotificationSettings / update
+ *  - Security (password) → authService.changePassword
+ *  - Billing tab remains read-only display (no billing mutation endpoints exposed to client)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,26 +21,221 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Building2,
-  Bell,
-  CreditCard,
-  Shield,
-  Upload,
-  Save,
+  Building2, Bell, CreditCard, Shield, Upload, Save, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { clientsService, type Client } from '@/api/services/clients.service';
+import {
+  settingsService,
+  type ClientNotificationSettings,
+  type ClientBusinessSettings,
+  type ApiErrorResponse,
+} from '@/api/services/settings.service';
+import authService from '@/api/services/auth.service';
+
+// ── Extended client type ──────────────────────────────────────────────────────
+
+type ClientWithBusinessSettings = Client & ClientBusinessSettings;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const FieldSkeleton = () => (
+  <div className="space-y-2">
+    <Skeleton className="h-4 w-24" />
+    <Skeleton className="h-10 w-full" />
+  </div>
+);
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 const ClientSettingsPage: React.FC = () => {
-  const [isSaving, setIsSaving] = useState(false);
+  const { user } = useAuth();
+  const clientId = user?.clientId ?? '';
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    toast.success('Settings saved successfully');
+  // ── Loading states ──────────────────────────────────────────────────────
+  const [loadingCompany, setLoadingCompany] = useState(true);
+  const [loadingNotifs,  setLoadingNotifs]  = useState(true);
+  const [savingCompany,  setSavingCompany]  = useState(false);
+  const [savingNotifs,   setSavingNotifs]   = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [uploadingLogo,  setUploadingLogo]  = useState(false);
+
+  // ── Company fields ──────────────────────────────────────────────────────
+  const [client, setClient] = useState<Client | null>(null);
+  const [companyForm, setCompanyForm] = useState({
+    name:    '',
+    email:   '',
+    phone:   '',
+    website: '',
+    address: '',
+    city:    '',
+    state:   '',
+    zipCode: '',
+    country: '',
+  });
+  const [businessForm, setBusinessForm] = useState({
+    timezone:      '',
+    currency:      '',
+    taxRate:       '',
+    invoicePrefix: '',
+  });
+
+  // ── Notification fields ─────────────────────────────────────────────────
+  const [notifs, setNotifs] = useState<ClientNotificationSettings>({
+    newOrderAlerts:    true,
+    deliveryUpdates:   true,
+    paymentReceived:   true,
+    lowStockAlerts:    true,
+    weeklyReports:     false,
+    orderConfirmation: true,
+    deliverySms:       true,
+    invoiceEmails:     true,
+  });
+
+  // ── Password fields ─────────────────────────────────────────────────────
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword:     '',
+    confirmPassword: '',
+  });
+
+  // ── Logo ref ────────────────────────────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Load company data ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!clientId) return;
+    setLoadingCompany(true);
+    clientsService.getClientById(clientId)
+      .then(data => {
+        setClient(data);
+        setCompanyForm({
+          name:    data.name    ?? '',
+          email:   data.email   ?? '',
+          phone:   data.phone   ?? '',
+          website: data.website ?? '',
+          address: data.address ?? '',
+          city:    data.city    ?? '',
+          state:   data.state   ?? '',
+          zipCode: data.zipCode ?? '',
+          country: data.country ?? '',
+        });
+        const extended = data as ClientWithBusinessSettings;
+        setBusinessForm({
+          timezone:      extended.timezone      ?? '',
+          currency:      extended.currency      ?? '',
+          taxRate:       extended.taxRate       ?? '',
+          invoicePrefix: extended.invoicePrefix ?? '',
+        });
+      })
+      .catch(() => toast.error('Failed to load company settings'))
+      .finally(() => setLoadingCompany(false));
+  }, [clientId]);
+
+  // ── Load notification settings ──────────────────────────────────────────
+  useEffect(() => {
+    if (!clientId) return;
+    setLoadingNotifs(true);
+    settingsService.getClientNotificationSettings(clientId)
+      .then(data => setNotifs(data))
+      .catch(() => {
+        // Non-fatal — keep defaults if endpoint not yet implemented
+      })
+      .finally(() => setLoadingNotifs(false));
+  }, [clientId]);
+
+  // ── Save company + business ─────────────────────────────────────────────
+  const handleSaveCompany = async () => {
+    if (!clientId) return;
+    setSavingCompany(true);
+    try {
+      await clientsService.updateClient(clientId, {
+        ...companyForm,
+        ...businessForm,
+      });
+      toast.success('Company settings saved');
+    } catch {
+      toast.error('Failed to save company settings');
+    } finally {
+      setSavingCompany(false);
+    }
   };
 
+  // ── Save notifications ──────────────────────────────────────────────────
+  const handleSaveNotifs = async () => {
+    if (!clientId) return;
+    setSavingNotifs(true);
+    try {
+      await settingsService.updateClientNotificationSettings(clientId, notifs);
+      toast.success('Notification preferences saved');
+    } catch {
+      toast.error('Failed to save notification preferences');
+    } finally {
+      setSavingNotifs(false);
+    }
+  };
+
+  // ── Toggle notification helper ──────────────────────────────────────────
+  const toggleNotif = (key: keyof ClientNotificationSettings, value: boolean) => {
+    setNotifs(prev => ({ ...prev, [key]: value }));
+  };
+
+  // ── Logo upload ─────────────────────────────────────────────────────────
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !clientId) return;
+    setUploadingLogo(true);
+    try {
+      const { logoUrl } = await clientsService.uploadLogo(clientId, file);
+      setClient(prev => prev ? { ...prev, logo: logoUrl } : prev);
+      toast.success('Logo updated');
+    } catch {
+      toast.error('Failed to upload logo');
+    } finally {
+      setUploadingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ── Password change ─────────────────────────────────────────────────────
+  const handleSavePassword = async () => {
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (passwordForm.newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await authService.changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword:     passwordForm.newPassword,
+        confirmPassword: passwordForm.confirmPassword,
+      });
+      toast.success('Password changed successfully');
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      const error = err as ApiErrorResponse;
+      const detail = error?.response?.data?.detail
+        ?? error?.response?.data?.old_password?.[0]
+        ?? 'Failed to change password';
+      toast.error(detail);
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  // ── Company initials for avatar fallback ────────────────────────────────
+  const initials = companyForm.name
+    ? companyForm.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    : 'CO';
+
+  // ── Render ──────────────────────────────────────────────────────────────
   return (
     <DashboardLayout title="Settings" subtitle="Manage your company settings">
       <Tabs defaultValue="company" className="space-y-6">
@@ -57,211 +258,315 @@ const ClientSettingsPage: React.FC = () => {
           </TabsTrigger>
         </TabsList>
 
+        {/* ── Company Tab ── */}
         <TabsContent value="company" className="space-y-6">
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Company Profile</h3>
-            
-            {/* Logo Upload */}
+
+            {/* Logo */}
             <div className="flex items-center gap-6 mb-6">
               <Avatar className="h-20 w-20">
-                <AvatarImage src="" />
-                <AvatarFallback className="text-2xl">PW</AvatarFallback>
+                <AvatarImage src={client?.logo ?? ''} />
+                <AvatarFallback className="text-2xl">{initials}</AvatarFallback>
               </Avatar>
               <div>
-                <Button variant="outline" size="sm">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Logo
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={handleLogoUpload}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={uploadingLogo}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploadingLogo
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <Upload className="h-4 w-4 mr-2" />}
+                  {uploadingLogo ? 'Uploading…' : 'Upload Logo'}
                 </Button>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Recommended: 200x200px, PNG or JPG
+                  PNG, JPG or WebP · max 2 MB
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label htmlFor="companyName">Company Name</Label>
-                <Input id="companyName" defaultValue="Pure Water Co." />
+            {loadingCompany ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {Array.from({ length: 6 }).map((_, i) => <FieldSkeleton key={i} />)}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" defaultValue="admin@purewater.com" />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(
+                  [
+                    { id: 'name',    label: 'Company Name' },
+                    { id: 'email',   label: 'Email',          type: 'email' },
+                    { id: 'phone',   label: 'Phone' },
+                    { id: 'website', label: 'Website' },
+                    { id: 'city',    label: 'City' },
+                    { id: 'state',   label: 'State / County' },
+                    { id: 'zipCode', label: 'ZIP / Postcode' },
+                    { id: 'country', label: 'Country' },
+                  ] as { id: keyof typeof companyForm; label: string; type?: string }[]
+                ).map(field => (
+                  <div key={field.id} className="space-y-2">
+                    <Label htmlFor={field.id}>{field.label}</Label>
+                    <Input
+                      id={field.id}
+                      type={field.type ?? 'text'}
+                      value={companyForm[field.id]}
+                      onChange={e => setCompanyForm(prev => ({
+                        ...prev, [field.id]: e.target.value,
+                      }))}
+                    />
+                  </div>
+                ))}
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="address">Street Address</Label>
+                  <Textarea
+                    id="address"
+                    rows={2}
+                    value={companyForm.address}
+                    onChange={e => setCompanyForm(prev => ({
+                      ...prev, address: e.target.value,
+                    }))}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone</Label>
-                <Input id="phone" defaultValue="+1 555-0101" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="website">Website</Label>
-                <Input id="website" defaultValue="www.purewater.com" />
-              </div>
-            </div>
-
-            <div className="mt-6 space-y-2">
-              <Label htmlFor="address">Address</Label>
-              <Textarea
-                id="address"
-                defaultValue="123 Water Street, Suite 100, Oceanview, CA 90210"
-                rows={2}
-              />
-            </div>
+            )}
           </Card>
 
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Business Settings</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label htmlFor="timezone">Timezone</Label>
-                <Input id="timezone" defaultValue="America/Los_Angeles" />
+            {loadingCompany ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {Array.from({ length: 4 }).map((_, i) => <FieldSkeleton key={i} />)}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="currency">Currency</Label>
-                <Input id="currency" defaultValue="USD" />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(
+                  [
+                    { id: 'timezone',      label: 'Timezone',       placeholder: 'Africa/Nairobi' },
+                    { id: 'currency',      label: 'Currency',       placeholder: 'KES' },
+                    { id: 'taxRate',       label: 'Tax Rate (%)',   placeholder: '16' },
+                    { id: 'invoicePrefix', label: 'Invoice Prefix', placeholder: 'INV-' },
+                  ] as { id: keyof typeof businessForm; label: string; placeholder: string }[]
+                ).map(field => (
+                  <div key={field.id} className="space-y-2">
+                    <Label htmlFor={field.id}>{field.label}</Label>
+                    <Input
+                      id={field.id}
+                      placeholder={field.placeholder}
+                      value={businessForm[field.id]}
+                      onChange={e => setBusinessForm(prev => ({
+                        ...prev, [field.id]: e.target.value,
+                      }))}
+                    />
+                  </div>
+                ))}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="taxRate">Tax Rate (%)</Label>
-                <Input id="taxRate" type="number" defaultValue="8.25" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="invoicePrefix">Invoice Prefix</Label>
-                <Input id="invoicePrefix" defaultValue="INV-" />
-              </div>
-            </div>
+            )}
           </Card>
+
+          <div className="flex justify-end">
+            <Button
+              variant="ocean"
+              onClick={handleSaveCompany}
+              disabled={savingCompany || loadingCompany}
+            >
+              {savingCompany
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Save className="h-4 w-4 mr-2" />}
+              {savingCompany ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
         </TabsContent>
 
+        {/* ── Notifications Tab ── */}
         <TabsContent value="notifications" className="space-y-6">
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Email Notifications</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">New Order Alerts</p>
-                  <p className="text-sm text-muted-foreground">
-                    Receive email when a new order is placed
-                  </p>
-                </div>
-                <Switch defaultChecked />
+            {loadingNotifs ? (
+              <div className="space-y-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-3 w-56" />
+                    </div>
+                    <Skeleton className="h-6 w-11 rounded-full" />
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Delivery Updates</p>
-                  <p className="text-sm text-muted-foreground">
-                    Get notified about delivery status changes
-                  </p>
-                </div>
-                <Switch defaultChecked />
+            ) : (
+              <div className="space-y-4">
+                {(
+                  [
+                    { key: 'newOrderAlerts',  label: 'New Order Alerts',  desc: 'Receive email when a new order is placed' },
+                    { key: 'deliveryUpdates', label: 'Delivery Updates',  desc: 'Get notified about delivery status changes' },
+                    { key: 'paymentReceived', label: 'Payment Received',  desc: 'Notification when payment is received' },
+                    { key: 'lowStockAlerts',  label: 'Low Stock Alerts',  desc: 'Alert when inventory is running low' },
+                    { key: 'weeklyReports',   label: 'Weekly Reports',    desc: 'Receive weekly performance summary' },
+                  ] as { key: keyof ClientNotificationSettings; label: string; desc: string }[]
+                ).map(item => (
+                  <div key={item.key} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{item.label}</p>
+                      <p className="text-sm text-muted-foreground">{item.desc}</p>
+                    </div>
+                    <Switch
+                      checked={notifs[item.key]}
+                      onCheckedChange={v => toggleNotif(item.key, v)}
+                    />
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Payment Received</p>
-                  <p className="text-sm text-muted-foreground">
-                    Notification when payment is received
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Low Stock Alerts</p>
-                  <p className="text-sm text-muted-foreground">
-                    Alert when inventory is running low
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Weekly Reports</p>
-                  <p className="text-sm text-muted-foreground">
-                    Receive weekly performance summary
-                  </p>
-                </div>
-                <Switch />
-              </div>
-            </div>
+            )}
           </Card>
 
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Customer Notifications</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Order Confirmation</p>
-                  <p className="text-sm text-muted-foreground">
-                    Send confirmation email to customers
-                  </p>
-                </div>
-                <Switch defaultChecked />
+            {loadingNotifs ? (
+              <div className="space-y-4">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-3 w-56" />
+                    </div>
+                    <Skeleton className="h-6 w-11 rounded-full" />
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Delivery SMS</p>
-                  <p className="text-sm text-muted-foreground">
-                    Send SMS when delivery is on the way
-                  </p>
-                </div>
-                <Switch defaultChecked />
+            ) : (
+              <div className="space-y-4">
+                {(
+                  [
+                    { key: 'orderConfirmation', label: 'Order Confirmation', desc: 'Send confirmation email to customers' },
+                    { key: 'deliverySms',       label: 'Delivery SMS',       desc: 'Send SMS when delivery is on the way' },
+                    { key: 'invoiceEmails',     label: 'Invoice Emails',     desc: 'Automatically email invoices' },
+                  ] as { key: keyof ClientNotificationSettings; label: string; desc: string }[]
+                ).map(item => (
+                  <div key={item.key} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{item.label}</p>
+                      <p className="text-sm text-muted-foreground">{item.desc}</p>
+                    </div>
+                    <Switch
+                      checked={notifs[item.key]}
+                      onCheckedChange={v => toggleNotif(item.key, v)}
+                    />
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Invoice Emails</p>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically email invoices
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </div>
+            )}
           </Card>
+
+          <div className="flex justify-end">
+            <Button
+              variant="ocean"
+              onClick={handleSaveNotifs}
+              disabled={savingNotifs || loadingNotifs}
+            >
+              {savingNotifs
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Save className="h-4 w-4 mr-2" />}
+              {savingNotifs ? 'Saving…' : 'Save Preferences'}
+            </Button>
+          </div>
         </TabsContent>
 
+        {/* ── Billing Tab — read-only ── */}
         <TabsContent value="billing" className="space-y-6">
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Current Plan</h3>
-            <div className="flex items-center justify-between p-4 bg-primary/5 rounded-lg border border-primary/20">
-              <div>
-                <p className="font-semibold text-lg">Professional Plan</p>
-                <p className="text-muted-foreground">$149/month • Billed monthly</p>
+            {loadingCompany ? (
+              <Skeleton className="h-20 w-full rounded-lg" />
+            ) : (
+              <div className="flex items-center justify-between p-4 bg-primary/5 rounded-lg border border-primary/20">
+                <div>
+                  <p className="font-semibold text-lg capitalize">
+                    {client?.subscriptionPlan ?? 'Unknown'} Plan
+                  </p>
+                  <p className="text-muted-foreground capitalize">
+                    Status: {client?.subscriptionStatus ?? '—'}
+                  </p>
+                </div>
+                <Button variant="outline" disabled>
+                  Contact Support to Upgrade
+                </Button>
               </div>
-              <Button variant="outline">Upgrade Plan</Button>
-            </div>
+            )}
           </Card>
 
           <Card className="p-6">
-            <h3 className="font-semibold mb-4">Payment Method</h3>
-            <div className="flex items-center justify-between p-4 border rounded-lg">
-              <div className="flex items-center gap-3">
-                <CreditCard className="h-8 w-8 text-muted-foreground" />
-                <div>
-                  <p className="font-medium">•••• •••• •••• 4242</p>
-                  <p className="text-sm text-muted-foreground">Expires 12/25</p>
-                </div>
-              </div>
-              <Button variant="outline" size="sm">
-                Update
-              </Button>
-            </div>
+            <h3 className="font-semibold mb-2">Payment Method</h3>
+            <p className="text-sm text-muted-foreground">
+              Payment method management is handled by your account administrator.
+              Please contact support to update billing details.
+            </p>
           </Card>
         </TabsContent>
 
+        {/* ── Security Tab ── */}
         <TabsContent value="security" className="space-y-6">
           <Card className="p-6">
-            <h3 className="font-semibold mb-4">Password</h3>
+            <h3 className="font-semibold mb-4">Change Password</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label htmlFor="currentPassword">Current Password</Label>
-                <Input id="currentPassword" type="password" />
+                <Input
+                  id="currentPassword"
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={e => setPasswordForm(prev => ({
+                    ...prev, currentPassword: e.target.value,
+                  }))}
+                />
               </div>
               <div />
               <div className="space-y-2">
                 <Label htmlFor="newPassword">New Password</Label>
-                <Input id="newPassword" type="password" />
+                <Input
+                  id="newPassword"
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={e => setPasswordForm(prev => ({
+                    ...prev, newPassword: e.target.value,
+                  }))}
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input id="confirmPassword" type="password" />
+                <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={e => setPasswordForm(prev => ({
+                    ...prev, confirmPassword: e.target.value,
+                  }))}
+                />
               </div>
+            </div>
+            <div className="flex justify-end mt-6">
+              <Button
+                variant="ocean"
+                onClick={handleSavePassword}
+                disabled={
+                  savingPassword ||
+                  !passwordForm.currentPassword ||
+                  !passwordForm.newPassword ||
+                  !passwordForm.confirmPassword
+                }
+              >
+                {savingPassword
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <Save className="h-4 w-4 mr-2" />}
+                {savingPassword ? 'Changing…' : 'Change Password'}
+              </Button>
             </div>
           </Card>
 
@@ -274,18 +579,14 @@ const ClientSettingsPage: React.FC = () => {
                   Add an extra layer of security to your account
                 </p>
               </div>
-              <Switch />
+              <Switch disabled />
             </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              2FA configuration coming soon. Contact support to enable this for your account.
+            </p>
           </Card>
         </TabsContent>
       </Tabs>
-
-      <div className="flex justify-end mt-6">
-        <Button variant="ocean" onClick={handleSave} disabled={isSaving}>
-          <Save className="h-4 w-4 mr-2" />
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </Button>
-      </div>
     </DashboardLayout>
   );
 };

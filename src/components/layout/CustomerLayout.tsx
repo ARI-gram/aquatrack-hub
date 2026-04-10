@@ -4,8 +4,8 @@
  *
  * Changes in this revision:
  *  - Mobile sidebar is now a left-side drawer (translate-based), matching AppSidebar pattern
- *  - Bottom nav shows primary 4 items; "More" button opens the left drawer
- *  - mobileOpen state owned by CustomerLayout
+ *  - Bottom nav shows primary 5 items; "More" button opens the left drawer
+ *  - mobileOpen state lifted into CustomerLayout
  *  - Desktop sidebar, all nav routes, isActive(), header, and page content unchanged
  */
 
@@ -40,15 +40,16 @@ interface NavItem {
   icon:  React.ElementType;
 }
 
-// Primary 4 shown in the bottom bar
-const primaryNavItems: NavItem[] = [
+const MOBILE_PRIMARY_COUNT = 5;
+
+const bottomNavItems: NavItem[] = [
   { label: 'Home',    path: CUSTOMER_ROUTES.DASHBOARD,     icon: Home     },
   { label: 'Orders',  path: CUSTOMER_ROUTES.ORDER_HISTORY, icon: Package  },
   { label: 'Bottles', path: CUSTOMER_ROUTES.BOTTLES,       icon: Droplets },
   { label: 'Wallet',  path: CUSTOMER_ROUTES.WALLET,        icon: Wallet   },
+  { label: 'Profile', path: CUSTOMER_ROUTES.PROFILE,       icon: User     },
 ];
 
-// All items shown in the desktop sidebar and the mobile left drawer
 const sidebarItems: NavItem[] = [
   { label: 'Dashboard',       path: CUSTOMER_ROUTES.DASHBOARD,       icon: Home         },
   { label: 'Place Order',     path: CUSTOMER_ROUTES.PLACE_ORDER,     icon: ShoppingCart },
@@ -62,9 +63,9 @@ const sidebarItems: NavItem[] = [
   { label: 'Profile',         path: CUSTOMER_ROUTES.PROFILE,         icon: User         },
 ];
 
-// Items only reachable via the More drawer on mobile
+// Items not in the bottom nav primary row → accessible via the drawer
 const overflowItems = sidebarItems.filter(
-  item => !primaryNavItems.some(p => p.path === item.path),
+  s => !bottomNavItems.slice(0, MOBILE_PRIMARY_COUNT).some(b => b.path === s.path),
 );
 
 export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
@@ -80,10 +81,11 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Customer';
   const handleBack  = () => { if (onBack) onBack(); else navigate(-1); };
 
-  const overflowIsActive = overflowItems.some(item => isActive(item.path));
-
   const bellReady = !!user && user.role === 'customer'
     && !!localStorage.getItem('aquatrack_token');
+
+  const overflowIsActive = overflowItems.some(item => isActive(item.path));
+  const hasOverflow      = overflowItems.length > 0;
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -95,82 +97,6 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           onClick={() => setMobileOpen(false)}
         />
       )}
-
-      {/* ─── Mobile left drawer ───────────────────────────────────── */}
-      <aside
-        className={cn(
-          'fixed left-0 top-0 z-40 h-screen flex flex-col lg:hidden',
-          'bg-card border-r border-border w-72',
-          'transition-all duration-300 ease-in-out',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full',
-        )}
-      >
-        {/* Drawer header */}
-        <div className="flex h-14 items-center justify-between px-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-ocean shadow-glow shrink-0">
-              <Droplets className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="text-base font-bold tracking-tight">AquaTrack</span>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileOpen(false)}
-            className="h-8 w-8 text-muted-foreground hover:bg-muted"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* User info */}
-        <div className="px-4 py-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-10 w-10 shrink-0">
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <p className="font-medium text-sm truncate">{displayName}</p>
-              <p className="text-xs text-muted-foreground truncate">
-                {user?.email ?? 'Customer'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Drawer nav — all sidebar items */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-          {sidebarItems.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                isActive(item.path)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* Drawer footer */}
-        <div className="px-3 py-4 border-t border-border shrink-0">
-          <button
-            onClick={logout}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </button>
-        </div>
-      </aside>
 
       {/* ─── Desktop Sidebar ──────────────────────────────────────── */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 border-r border-border bg-card z-30">
@@ -217,6 +143,76 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
         </nav>
 
         <div className="px-3 py-4 border-t border-border">
+          <button
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      {/* ─── Mobile left drawer sidebar ───────────────────────────── */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 z-40 h-screen flex flex-col lg:hidden',
+          'bg-card border-r border-border w-72',
+          'transition-all duration-300 ease-in-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        {/* Drawer header */}
+        <div className="flex h-14 items-center justify-between px-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-ocean shadow-glow shrink-0">
+              <Droplets className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <span className="text-sm font-bold">AquaTrack</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileOpen(false)}
+            className="h-8 w-8 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Drawer nav — all sidebar items */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
+          {sidebarItems.map(item => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                isActive(item.path)
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        {/* Drawer footer */}
+        <div className="border-t border-border p-4 shrink-0">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="h-9 w-9 shrink-0">
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">{displayName}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email ?? 'Customer'}</p>
+            </div>
+          </div>
           <button
             onClick={logout}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
@@ -308,7 +304,7 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-5 lg:px-8 lg:py-6 pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
+        <main className="flex-1 px-4 py-5 lg:px-8 lg:py-6 pb-24 lg:pb-8">
           <div className="max-w-4xl mx-auto">
             {children}
           </div>
@@ -321,7 +317,7 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           className="flex items-stretch justify-around px-1"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
-          {primaryNavItems.map(item => {
+          {bottomNavItems.map(item => {
             const active = isActive(item.path);
             return (
               <NavLink
@@ -349,26 +345,28 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           })}
 
           {/* More — opens the left drawer */}
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
-          >
-            <div className={cn(
-              'flex items-center justify-center h-8 w-8 rounded-2xl transition-all duration-200',
-              overflowIsActive ? 'bg-primary/12 scale-110' : 'scale-100',
-            )}>
-              <MoreHorizontal className={cn(
-                'h-[22px] w-[22px]',
+          {hasOverflow && (
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
+            >
+              <div className={cn(
+                'flex items-center justify-center h-8 w-8 rounded-2xl transition-all duration-200',
+                overflowIsActive ? 'bg-primary/12 scale-110' : 'scale-100',
+              )}>
+                <MoreHorizontal className={cn(
+                  'h-[22px] w-[22px]',
+                  overflowIsActive ? 'text-primary' : 'text-muted-foreground',
+                )} />
+              </div>
+              <span className={cn(
+                'text-[10px] font-semibold tracking-wide',
                 overflowIsActive ? 'text-primary' : 'text-muted-foreground',
-              )} />
-            </div>
-            <span className={cn(
-              'text-[10px] font-semibold tracking-wide',
-              overflowIsActive ? 'text-primary' : 'text-muted-foreground',
-            )}>
-              More
-            </span>
-          </button>
+              )}>
+                More
+              </span>
+            </button>
+          )}
         </div>
       </nav>
     </div>

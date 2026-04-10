@@ -116,6 +116,16 @@ function unwrapArray<T>(raw: unknown): T[] {
 
 export const bottleStoreService = {
 
+  async openingStock(data: {
+    product: string;
+    qty_full: number;
+    qty_empty: number;
+    notes?: string;
+  }): Promise<{ movement: unknown; balance: BottleBalance }> {
+    const r = await axiosInstance.post('/store/bottles/opening-stock/', data);
+    return r.data;
+  },
+
   /**
    * GET /api/store/bottles/
    *

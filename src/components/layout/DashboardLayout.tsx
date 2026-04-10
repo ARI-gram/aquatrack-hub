@@ -18,11 +18,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   title,
   subtitle,
 }) => {
-  const { user }                                     = useAuth();
-  const { mustChange, showBanner, daysLeft, reason } = usePasswordPolicy(user ?? null);
-  const [sidebarCollapsed, setSidebarCollapsed]      = useState(false);
-  const [mobileOpen,       setMobileOpen]            = useState(false);
-  const [manualChangeOpen, setManualChangeOpen]      = useState(false);
+  const { user }                                      = useAuth();   // ← pulls user from context
+  const { mustChange, showBanner, daysLeft, reason }  = usePasswordPolicy(user ?? null);
+  const [sidebarCollapsed, setSidebarCollapsed]       = useState(false);
+  const [mobileMenuOpen,   setMobileMenuOpen]         = useState(false);
+  const [manualChangeOpen, setManualChangeOpen]       = useState(false);
 
   return (
     <div className="min-h-screen bg-gradient-surface">
@@ -41,36 +41,33 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         reason={reason}
       />
 
-      {/* ── Mobile backdrop overlay ── */}
-      {mobileOpen && (
+      {/* Mobile overlay */}
+      {mobileMenuOpen && (
         <div
           className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm lg:hidden"
-          onClick={() => setMobileOpen(false)}
+          onClick={() => setMobileMenuOpen(false)}
         />
       )}
 
-      {/* ── Sidebar — single instance; translate drives mobile open/close ── */}
-      <AppSidebar
-        collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(prev => !prev)}
-        mobileOpen={mobileOpen}
-        onMobileOpen={() => setMobileOpen(true)}
-        onMobileClose={() => setMobileOpen(false)}
-      />
+      {/* Sidebar */}
+      <div className={cn('hidden lg:block', mobileMenuOpen && 'block')}>
+        <AppSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+      </div>
 
-      {/* ── Main content ── */}
+      {/* Main content */}
       <div
         className={cn(
           'transition-all duration-300 ease-in-out',
-          sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64',
-          // Mobile: clear fixed top bar + fixed bottom nav
-          'pt-14 pb-16 lg:pt-0 lg:pb-0',
+          sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
         )}
       >
         <Header
           title={title}
           subtitle={subtitle}
-          onMenuClick={() => setMobileOpen(prev => !prev)}
+          onMenuClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
 
         <main className="p-6">

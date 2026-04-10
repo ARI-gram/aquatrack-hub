@@ -1,12 +1,13 @@
 /**
  * Driver Layout Component
- * Mobile-first: 4 primary tabs + "More" drawer that exposes the remaining items.
+ * Mobile-first: 4 primary tabs + "More" left drawer.
  * Desktop keeps the full sidebar unchanged.
  *
  * Changes in this revision:
- *  - Added Receipts nav item (Receipt icon → /driver/receipts)
- *  - Receipts sits in moreNavItems (accessible via the More drawer on mobile)
- *  - Receipts sits in sidebarItems (always visible on desktop)
+ *  - Mobile "More" bottom sheet replaced with left-side drawer (translate-based),
+ *    matching AppSidebar pattern
+ *  - MoreDrawer component removed; mobileOpen state drives the drawer directly
+ *  - Desktop sidebar, all nav routes, isActive(), header, and page content unchanged
  */
 
 import React, { useState } from 'react';
@@ -17,7 +18,7 @@ import {
   Home, Truck, ClipboardList, MapPin, User,
   LogOut, Package, Settings, ChevronLeft, Droplets,
   PackageSearch, ShoppingCart, MoreHorizontal, X,
-  Receipt,                                          // ← NEW
+  Receipt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -35,7 +36,7 @@ const DRIVER_ROUTES = {
   DELIVERIES: ROUTES.DRIVER.DELIVERIES,
   STORE:      ROUTES.DRIVER.STORE,
   HISTORY:    '/driver/history',
-  RECEIPTS:   '/driver/receipts',               // ← NEW
+  RECEIPTS:   '/driver/receipts',
   MAP:        '/driver/map',
   PROFILE:    '/driver/profile',
   SETTINGS:   '/driver/settings',
@@ -63,11 +64,11 @@ const primaryNavItems: NavItem[] = [
 
 // Items accessible via the More drawer on mobile
 const moreNavItems: NavItem[] = [
-  { label: 'History',  path: DRIVER_ROUTES.HISTORY,   icon: ClipboardList },
-  { label: 'Receipts', path: DRIVER_ROUTES.RECEIPTS,  icon: Receipt       }, // ← NEW
-  { label: 'My Sales', path: DRIVER_ROUTES.SALES,     icon: ShoppingCart  },
-  { label: 'Profile',  path: DRIVER_ROUTES.PROFILE,   icon: User          },
-  { label: 'Settings', path: DRIVER_ROUTES.SETTINGS,  icon: Settings      },
+  { label: 'History',  path: DRIVER_ROUTES.HISTORY,  icon: ClipboardList },
+  { label: 'Receipts', path: DRIVER_ROUTES.RECEIPTS, icon: Receipt       },
+  { label: 'My Sales', path: DRIVER_ROUTES.SALES,    icon: ShoppingCart  },
+  { label: 'Profile',  path: DRIVER_ROUTES.PROFILE,  icon: User          },
+  { label: 'Settings', path: DRIVER_ROUTES.SETTINGS, icon: Settings      },
 ];
 
 // Desktop sidebar — all items
@@ -76,111 +77,12 @@ const sidebarItems: NavItem[] = [
   { label: 'Delivery Queue',   path: DRIVER_ROUTES.DELIVERIES, icon: Truck         },
   { label: 'Van Stock',        path: DRIVER_ROUTES.STORE,      icon: PackageSearch },
   { label: 'Delivery History', path: DRIVER_ROUTES.HISTORY,    icon: ClipboardList },
-  { label: 'Receipts',         path: DRIVER_ROUTES.RECEIPTS,   icon: Receipt       }, // ← NEW
+  { label: 'Receipts',         path: DRIVER_ROUTES.RECEIPTS,   icon: Receipt       },
   { label: 'My Sales',         path: DRIVER_ROUTES.SALES,      icon: ShoppingCart  },
   { label: 'Live Map',         path: DRIVER_ROUTES.MAP,        icon: MapPin        },
   { label: 'Profile',          path: DRIVER_ROUTES.PROFILE,    icon: User          },
   { label: 'Settings',         path: DRIVER_ROUTES.SETTINGS,   icon: Settings      },
 ];
-
-// ── More drawer ───────────────────────────────────────────────────────────────
-
-interface MoreDrawerProps {
-  open:        boolean;
-  onClose:     () => void;
-  isActive:    (path: string) => boolean;
-  onNavigate:  (path: string) => void;
-  displayName: string;
-  initials:    string;
-  email:       string;
-  onLogout:    () => void;
-}
-
-const MoreDrawer: React.FC<MoreDrawerProps> = ({
-  open, onClose, isActive, onNavigate, displayName, initials, email, onLogout,
-}) => {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 lg:hidden">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Sheet */}
-      <div className="absolute bottom-0 left-0 right-0 bg-background rounded-t-3xl shadow-2xl">
-        {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 bg-border rounded-full" />
-        </div>
-
-        {/* User info */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border/60">
-          <Avatar className="h-10 w-10 shrink-0">
-            <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-sm truncate">{displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">{email}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="h-9 w-9 flex items-center justify-center rounded-xl bg-muted/50 hover:bg-muted transition-colors shrink-0"
-          >
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
-        </div>
-
-        {/* Grid of overflow nav items */}
-        <div className="px-4 py-4 grid grid-cols-4 gap-3">
-          {moreNavItems.map(item => {
-            const active = isActive(item.path);
-            return (
-              <button
-                key={item.path}
-                onClick={() => { onNavigate(item.path); onClose(); }}
-                className={cn(
-                  'flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all active:scale-[0.96]',
-                  active ? 'bg-primary/10' : 'hover:bg-muted/60',
-                )}
-              >
-                <div className={cn(
-                  'h-11 w-11 rounded-2xl flex items-center justify-center transition-colors',
-                  active
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted/60 text-muted-foreground',
-                )}>
-                  <item.icon className="h-5 w-5" />
-                </div>
-                <span className={cn(
-                  'text-[11px] font-semibold text-center leading-tight',
-                  active ? 'text-primary' : 'text-muted-foreground',
-                )}>
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Logout */}
-        <div className="px-4 pt-1 pb-4 border-t border-border/40">
-          <button
-            onClick={() => { onLogout(); onClose(); }}
-            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-destructive font-semibold text-sm hover:bg-destructive/8 transition-colors active:scale-[0.98]"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            Sign Out
-          </button>
-        </div>
-
-        {/* Safe area */}
-        <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
-      </div>
-    </div>
-  );
-};
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 
@@ -190,14 +92,13 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
   const { user, logout } = useAuth();
   const location         = useLocation();
   const navigate         = useNavigate();
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (path: string) =>
     path === DRIVER_ROUTES.DASHBOARD
       ? location.pathname === path
       : location.pathname.startsWith(path);
 
-  // True if any "more" item is currently active — lights up the More tab
   const moreIsActive = moreNavItems.some(item => isActive(item.path));
 
   const initials    = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('') || '?';
@@ -206,6 +107,14 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
 
   return (
     <div className="min-h-screen bg-background flex">
+
+      {/* ─── Mobile backdrop overlay ──────────────────────────────── */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
 
       {/* ─── Desktop Sidebar ──────────────────────────────────────── */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 border-r border-border bg-card z-30">
@@ -262,10 +171,82 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
         </div>
       </aside>
 
+      {/* ─── Mobile left drawer sidebar ───────────────────────────── */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 z-40 h-screen flex flex-col lg:hidden',
+          'bg-card border-r border-border w-72',
+          'transition-all duration-300 ease-in-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        {/* Drawer header */}
+        <div className="flex h-14 items-center justify-between px-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-ocean shadow-glow shrink-0">
+              <Droplets className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-sm font-bold">AquaTrack</span>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest -mt-0.5">Driver Portal</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileOpen(false)}
+            className="h-8 w-8 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Drawer nav — all items */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
+          {[...primaryNavItems, ...moreNavItems].map(item => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                isActive(item.path)
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        {/* Drawer footer */}
+        <div className="border-t border-border p-4 shrink-0">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="h-9 w-9 shrink-0">
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">{displayName}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email ?? 'Driver'}</p>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </button>
+        </div>
+      </aside>
+
       {/* ─── Main area ────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
 
-        {/* Mobile-optimized header */}
         <header className="sticky top-0 z-20 flex h-14 items-center border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {showBackButton ? (
@@ -298,7 +279,6 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
           <div className="flex items-center gap-1 shrink-0">
             <NotificationBell />
 
-            {/* Desktop profile dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="hidden lg:flex h-9 w-9 rounded-xl">
@@ -332,7 +312,6 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
                     <PackageSearch className="h-4 w-4 mr-2" />Van Stock
                   </NavLink>
                 </DropdownMenuItem>
-                {/* ← NEW */}
                 <DropdownMenuItem asChild>
                   <NavLink to={DRIVER_ROUTES.RECEIPTS} className="cursor-pointer">
                     <Receipt className="h-4 w-4 mr-2" />Receipts
@@ -352,7 +331,6 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
           </div>
         </header>
 
-        {/* Main content */}
         <main className="flex-1 px-4 py-4 lg:px-8 lg:py-6 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-8 overflow-x-hidden">
           <div className="max-w-5xl mx-auto w-full">{children}</div>
         </main>
@@ -364,7 +342,6 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
           className="flex items-stretch justify-around px-1"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
-          {/* Primary tabs */}
           {primaryNavItems.map(item => {
             const active = isActive(item.path);
             return (
@@ -392,9 +369,9 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
             );
           })}
 
-          {/* More tab */}
+          {/* More — opens the left drawer */}
           <button
-            onClick={() => setMoreOpen(true)}
+            onClick={() => setMobileOpen(true)}
             className="flex flex-col items-center justify-center gap-0.5 flex-1 pt-2 pb-2.5 min-h-[56px]"
           >
             <div className={cn(
@@ -415,18 +392,6 @@ export const DriverLayout: React.FC<DriverLayoutProps> = ({
           </button>
         </div>
       </nav>
-
-      {/* More drawer */}
-      <MoreDrawer
-        open={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        isActive={isActive}
-        onNavigate={path => navigate(path)}
-        displayName={displayName}
-        initials={initials}
-        email={user?.email ?? ''}
-        onLogout={logout}
-      />
     </div>
   );
 };

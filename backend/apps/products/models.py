@@ -205,6 +205,7 @@ class BottleMovement(models.Model):
     """
 
     MOVEMENT_TYPES = [
+        ('OPENING_STOCK', 'Opening Stock'),
         ('RECEIVE_EMPTY', 'Receive Empties'),
         ('REFILL',        'Refill Empties'),
         ('DISTRIBUTE',    'Distribute to Van'),

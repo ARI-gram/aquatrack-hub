@@ -54,8 +54,13 @@ def _name(user):
 def _bottle_balance(product_id):
     mvs = BottleMovement.objects.filter(product_id=product_id)
 
-    # Only count store-level receives (recorded_by is set = store staff action)
-    # Driver-side RECEIVE_EMPTY (collected at point of sale) have recorded_by=None
+    # ── Opening stock (onboarding) ────────────────────────────────────
+    opening_full = mvs.filter(movement_type='OPENING_STOCK').aggregate(
+        t=Sum('qty_good'))['t'] or 0
+    opening_empty = mvs.filter(movement_type='OPENING_STOCK').aggregate(
+        t=Sum('qty_damaged'))['t'] or 0  # reuse qty_damaged for empty count
+
+    # ── Store receives (from drivers) ─────────────────────────────────
     store_receives = mvs.filter(
         movement_type='RECEIVE_EMPTY',
         recorded_by__isnull=False,
@@ -72,8 +77,8 @@ def _bottle_balance(product_id):
         t=Sum('qty_good'))['t'] or 0
 
     return {
-        'full':    max(0, refilled - distributed - sold_direct),
-        'empty':   max(0, received_good - refilled),
+        'full':    max(0, opening_full + refilled - distributed - sold_direct),
+        'empty':   max(0, opening_empty + received_good - refilled),
         'damaged': received_damaged,
         'missing': received_missing,
     }
@@ -124,6 +129,58 @@ def _consumable_balance(product_id):
     sold_direct = mvs.filter(movement_type='DIRECT_SALE').aggregate(
         t=Sum('quantity'))['t'] or 0
     return {'in_stock': max(0, received - distributed - sold_direct)}
+
+
+class OpeningStockView(APIView):
+    """
+    POST /api/store/bottles/opening-stock/
+
+    One-time (or corrective) stock load.
+    Use during onboarding OR when physical count diverges from system.
+
+    Body:
+    {
+        "product": "<uuid>",
+        "qty_full":  20,    // full bottles already in warehouse
+        "qty_empty": 5,     // empty bottles already in warehouse
+        "notes": "Initial stock load on 2025-01-01"
+    }
+    """
+    permission_classes = [IsClientStaff]
+
+    def post(self, request):
+        data = request.data
+        client = request.user.client
+
+        try:
+            product = Product.objects.get(
+                pk=data.get('product'), client=client, is_returnable=True)
+        except Product.DoesNotExist:
+            return Response({'error': 'Returnable product not found.'}, status=404)
+
+        qty_full = max(0, int(data.get('qty_full',  0)))
+        qty_empty = max(0, int(data.get('qty_empty', 0)))
+
+        if qty_full == 0 and qty_empty == 0:
+            return Response(
+                {'error': 'Provide at least one of qty_full or qty_empty.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mv = BottleMovement.objects.create(
+            product=product,
+            movement_type='OPENING_STOCK',
+            qty_good=qty_full,       # full bottles
+            qty_damaged=qty_empty,   # empty bottles (reusing field)
+            qty_missing=0,
+            notes=data.get('notes', ''),
+            recorded_by=request.user,
+        )
+
+        return Response({
+            'movement': BottleMovementSerializer(mv).data,
+            'balance':  _bottle_balance(product.id),
+        }, status=status.HTTP_201_CREATED)
 
 
 class DriverExpectedEmptiesView(APIView):

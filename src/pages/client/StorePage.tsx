@@ -42,6 +42,7 @@ import {
   ChevronLeft, SlidersHorizontal, Filter, Users,
   ChevronDown, CheckCircle2, AlertTriangle, TrendingDown, TrendingUp,
   AlignJustify, ChevronRight, Phone, Plus, Check, UserCheck, Minus,
+  PackagePlus,
 } from 'lucide-react';
 import { useToast }    from '@/hooks/use-toast';
 import { useAuth }     from '@/contexts/AuthContext';
@@ -1942,7 +1943,7 @@ const DriverVanStockTab: React.FC<{
 // OPERATION DIALOGS
 // ─────────────────────────────────────────────────────────────────────────────
 
-type BottleDialog     = 'receive' | 'refill' | 'distribute' | 'sale' | null;
+type BottleDialog = 'receive' | 'refill' | 'distribute' | 'sale' | 'opening-stock' | null;
 type ConsumableDialog = 'receive' | 'distribute' | 'sale' | null;
 
 const ProductSelectTrigger: React.FC<{
@@ -3612,6 +3613,114 @@ const DistributeConsumableDialog: React.FC<{
   );
 };
 
+const OpeningStockDialog: React.FC<{
+  open: boolean; products: BottleProductStore[];
+  onClose: () => void; onSaved: (id: string, b: BottleBalance) => void;
+}> = ({ open, products, onClose, onSaved }) => {
+  const { toast } = useToast();
+  const [loading, setLoading]   = useState(false);
+  const [productId, setProductId] = useState('');
+  const [qtyFull,  setQtyFull]  = useState('');
+  const [qtyEmpty, setQtyEmpty] = useState('');
+  const [notes,    setNotes]    = useState('');
+
+  useEffect(() => {
+    if (open) { setProductId(''); setQtyFull(''); setQtyEmpty(''); setNotes(''); }
+  }, [open]);
+
+  const handleSubmit = async () => {
+    if (!productId) return toast({ title: 'Select a product', variant: 'destructive' });
+    const full  = parseInt(qtyFull)  || 0;
+    const empty = parseInt(qtyEmpty) || 0;
+    if (full === 0 && empty === 0)
+      return toast({ title: 'Enter at least one quantity', variant: 'destructive' });
+
+    setLoading(true);
+    try {
+      const res = await bottleStoreService.openingStock({ product: productId, qty_full: full, qty_empty: empty, notes });
+      toast({ title: `Opening stock loaded — ${full} full, ${empty} empty.` });
+      onSaved(productId, res.balance);
+      onClose();
+    } catch (err: unknown) {
+      toast({
+        title: 'Error',
+        description: (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed.',
+        variant: 'destructive',
+      });
+    } finally { setLoading(false); }
+  };
+
+  const productOptions = products.map(p => ({
+    id:       p.product_id,
+    name:     p.product_name,
+    unit:     (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
+    imageUrl: (p as unknown as Record<string, string | null>).product_image ?? null,
+  }));
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-sm max-h-[90dvh] overflow-y-auto">
+        <div className="bg-gradient-to-br from-teal-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-5 border-b border-border/60">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-teal-500/10 text-teal-600 border border-teal-500/20">
+              <PackagePlus className="h-5 w-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold">Opening Stock</DialogTitle>
+              <DialogDescription className="text-xs mt-0">
+                Load initial stock — use for onboarding or supplier restock
+              </DialogDescription>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-teal-500/8 border border-teal-500/20 px-3 py-2.5 mb-2 text-xs text-teal-700 dark:text-teal-300">
+          Use this when you have physical stock that isn't in the system yet — 
+          first-time setup, or bottles arriving directly from a supplier.
+        </div>
+
+        <div className="space-y-4">
+          <Field label="Product" required>
+            <Select value={productId} onValueChange={setProductId}>
+              <SelectTrigger className="h-11">
+                <ProductSelectTrigger selectedId={productId} products={productOptions} placeholder="Select bottle product…" />
+              </SelectTrigger>
+              <SelectContent className="max-h-64">
+                {productOptions.map(p => (
+                  <SelectItem key={p.id} value={p.id} className="py-1.5">
+                    <ProductDropdownItem name={p.name} unit={p.unit} imageUrl={p.imageUrl} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Full bottles" hint="Ready to distribute">
+              <Input type="number" min={0} placeholder="0" value={qtyFull}  onChange={e => setQtyFull(e.target.value)}  />
+            </Field>
+            <Field label="Empty bottles" hint="In warehouse">
+              <Input type="number" min={0} placeholder="0" value={qtyEmpty} onChange={e => setQtyEmpty(e.target.value)} />
+            </Field>
+          </div>
+
+          <Field label="Notes" hint="e.g. Initial setup, Supplier restock from XYZ">
+            <Textarea rows={2} className="resize-none" placeholder="Optional…" value={notes} onChange={e => setNotes(e.target.value)} />
+          </Field>
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <Button variant="outline" className="flex-1" onClick={onClose} disabled={loading}>Cancel</Button>
+          <Button variant="ocean" className="flex-1" onClick={handleSubmit} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <PackagePlus className="h-4 w-4 mr-2" />}
+            Load Stock
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3861,6 +3970,7 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
           <TabsContent value="bottles" className="space-y-4 mt-0">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
+                { label: 'Opening Stock', icon:   <PackagePlus     className="h-4 w-4" />, color: 'text-teal-600', bg: 'hover:bg-teal-500/5 hover:border-teal-500/20', onClick: () => setBottleDialog('opening-stock') },
                 { label: 'Receive Empties', icon: <ArrowDownToLine className="h-4 w-4" />, color: 'text-blue-600',    bg: 'hover:bg-blue-500/5 hover:border-blue-500/20',       onClick: () => setBottleDialog('receive')    },
                 { label: 'Refill',          icon: <RotateCcw       className="h-4 w-4" />, color: 'text-emerald-600', bg: 'hover:bg-emerald-500/5 hover:border-emerald-500/20', onClick: () => setBottleDialog('refill')     },
                 { label: 'Distribute',      icon: <Truck           className="h-4 w-4" />, color: 'text-violet-600',  bg: 'hover:bg-violet-500/5 hover:border-violet-500/20',   onClick: () => setBottleDialog('distribute') },
@@ -4064,6 +4174,11 @@ const StorePage: React.FC<StorePageProps> = ({ layout = 'dashboard' }) => {
       />
       <DistributeBottlesDialog
         open={bottleDialog === 'distribute'} products={bottleProducts} drivers={drivers}
+        onClose={() => setBottleDialog(null)}
+        onSaved={(id, b) => { updateBottleBalance(id, b); reloadBottleHistory(id); }}
+      />
+      <OpeningStockDialog
+        open={bottleDialog === 'opening-stock'} products={bottleProducts}
         onClose={() => setBottleDialog(null)}
         onSaved={(id, b) => { updateBottleBalance(id, b); reloadBottleHistory(id); }}
       />
