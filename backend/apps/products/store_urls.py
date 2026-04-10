@@ -12,6 +12,7 @@ from apps.products.store_views import (
     ReceiveEmptyView,
     RefillBottlesView,
     DistributeBottlesView,
+    OpeningStockView,
     DirectSaleBottleView,
     ConsumableStoreView,
     ReceiveConsumableView,
@@ -35,6 +36,8 @@ urlpatterns = [
          name='bottles-distribute'),
     path('bottles/direct-sale/',      DirectSaleBottleView.as_view(),
          name='bottles-direct-sale'),
+    path('bottles/opening-stock/',    OpeningStockView.as_view(),   # ← add these 2 lines
+         name='bottles-opening-stock'),
 
     # ── Consumables (non-returnable) ──────────────────────────────────────────
     path('consumables/',              ConsumableStoreView.as_view(),
