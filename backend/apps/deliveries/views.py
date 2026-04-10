@@ -24,6 +24,7 @@ from apps.deliveries.serializers import (
     ClientDeliveryStatsSerializer,
     DriverAssignmentSerializer,
 )
+from apps.deliveries.partial_delivery import apply_partial_delivery_adjustment
 from apps.authentication.models import User
 from apps.orders.models import Order
 from apps.notifications import notify
@@ -875,7 +876,7 @@ class DriverCompleteDeliveryView(APIView):
                     logging.getLogger(__name__).warning(
                         'RECEIVE_EMPTY movement failed for delivery %s', delivery_id)
 
-        # ── Partial delivery adjustment (NEW) ─────────────────────────────────
+        # ── Partial delivery adjustment ───────────────────────────────────────
         #
         # Strategy:
         #   1. If the driver supplied per-item `delivered_items[]`, use those.
