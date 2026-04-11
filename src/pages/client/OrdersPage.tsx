@@ -769,35 +769,70 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   return (
     <Wrapper>
 
-      <div className="flex items-center justify-between gap-3 mb-6">
-        <div className="flex-1" />
-        <div className="flex items-center gap-2">
-          {/* NEW: Create Order (manual/phone orders) */}
-          <Button
-            variant="outline"
-            className="gap-2 h-10 rounded-xl font-semibold"
-            onClick={() => setCreateOrderOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Create Order
-          </Button>
-      
-          {/* Existing: Make Delivery */}
-          <Button
-            className="gap-2 h-10 rounded-xl font-semibold shadow-sm"
-            onClick={() => setMakeDeliveryOpen(true)}
-          >
-            <Truck className="h-4 w-4" />
-            Make Delivery
-            {unassignedCount > 0 && (
-              <span className="ml-0.5 inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-white/20 text-[10px] font-bold px-1">
-                {unassignedCount}
-              </span>
-            )}
-          </Button>
+      {/* Search + date filter + refresh + actions */}
+      <div className="flex flex-col sm:flex-row gap-2 mb-5">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search by order number or customer…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="pl-9 h-10 rounded-xl bg-muted/40 border-transparent focus:border-input"
+          />
         </div>
-      </div>
+        <Select value={dateFilter} onValueChange={setDateFilter}>
+          <SelectTrigger className="h-10 rounded-xl bg-muted/40 border-transparent text-sm w-full sm:w-44">
+            <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Date range" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="week">Last 7 days</SelectItem>
+            <SelectItem value="month">Last 30 days</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-10 rounded-xl gap-2 shrink-0"
+          onClick={fetchOrders}
+          disabled={isLoading}
+        >
+          {isLoading
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <RefreshCw className="h-4 w-4" />
+          }
+          <span className="hidden sm:inline">Refresh</span>
+        </Button>
 
+        {/* Divider */}
+        <div className="hidden sm:block w-px bg-border self-stretch" />
+
+        <Button
+          variant="outline"
+          className="gap-2 h-10 rounded-xl font-semibold shrink-0"
+          onClick={() => setCreateOrderOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">Create Order</span>
+          <span className="sm:hidden">Create</span>
+        </Button>
+        <Button
+          className="gap-2 h-10 rounded-xl font-semibold shadow-sm shrink-0"
+          onClick={() => setMakeDeliveryOpen(true)}
+        >
+          <Truck className="h-4 w-4" />
+          <span className="hidden sm:inline">Make Delivery</span>
+          <span className="sm:hidden">Deliver</span>
+          {unassignedCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[18px] h-4 rounded-full bg-white/20 text-[10px] font-bold px-1">
+              {unassignedCount}
+            </span>
+          )}
+        </Button>
+      </div>
+      
       {/* Stats strip */}
       {!isLoading && orders.length > 0 && (
         <div className="flex gap-2 mb-6 overflow-x-auto pb-0.5 -mx-1 px-1">
