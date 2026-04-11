@@ -1,9 +1,6 @@
 /**
- * CreateOrderDialog
+ * CreateOrderDialog — Responsive (mobile / tablet / desktop)
  * src/components/dialogs/CreateOrderDialog.tsx
- *
- * Allows a client_admin / site_manager to place an order on behalf
- * of any customer (phone / WhatsApp orders).
  *
  * POST /api/orders/admin-create/
  */
@@ -73,17 +70,17 @@ interface AddressOption {
 }
 
 interface ProductOption {
-  id:           string;
-  name:         string;
-  unit:         string;
+  id:            string;
+  name:          string;
+  unit:          string;
   selling_price: string;
-  delivery_fee: string;
-  is_available: boolean;
+  delivery_fee:  string;
+  is_available:  boolean;
   is_returnable?: boolean;
 }
 
 interface CartItem {
-  product: ProductOption;
+  product:  ProductOption;
   quantity: number;
 }
 
@@ -91,7 +88,6 @@ export interface CreateOrderDialogProps {
   open:      boolean;
   onClose:   () => void;
   onCreated: (order: { id: string; order_number: string; customer_name: string }) => void;
-  /** Pre-select a customer (when opened from customer profile) */
   preselectedCustomerId?: string;
 }
 
@@ -110,10 +106,10 @@ const TIME_SLOTS = [
 ];
 
 const PAYMENT_METHODS = [
-  { value: 'CASH',   label: 'Cash on Delivery', icon: <Banknote   className="h-4 w-4 text-amber-600"  /> },
-  { value: 'MPESA',  label: 'M-Pesa',           icon: <Smartphone className="h-4 w-4 text-green-600"  /> },
-  { value: 'WALLET', label: 'Wallet',            icon: <Wallet     className="h-4 w-4 text-blue-600"   /> },
-  { value: 'CREDIT', label: 'Invoice (Credit)',  icon: <FileText   className="h-4 w-4 text-purple-600" /> },
+  { value: 'CASH',   label: 'Cash',    sublabel: 'On delivery',  icon: <Banknote   className="h-5 w-5 text-amber-600"  /> },
+  { value: 'MPESA',  label: 'M-Pesa',  sublabel: 'Mobile money', icon: <Smartphone className="h-5 w-5 text-green-600"  /> },
+  { value: 'WALLET', label: 'Wallet',  sublabel: 'Account bal.', icon: <Wallet     className="h-5 w-5 text-blue-600"   /> },
+  { value: 'CREDIT', label: 'Invoice', sublabel: 'Credit terms', icon: <FileText   className="h-5 w-5 text-purple-600" /> },
 ];
 
 function todayStr() {
@@ -142,30 +138,30 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
   open, onClose, onCreated, preselectedCustomerId,
 }) => {
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [customers,     setCustomers]     = useState<CustomerOption[]>([]);
-  const [products,      setProducts]      = useState<ProductOption[]>([]);
-  const [loadingData,   setLoadingData]   = useState(false);
+  const [customers,   setCustomers]   = useState<CustomerOption[]>([]);
+  const [products,    setProducts]    = useState<ProductOption[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [selectedCustomer,  setSelectedCustomer]  = useState<CustomerOption | null>(null);
   const [customerOpen,      setCustomerOpen]      = useState(false);
   const [customerSearch,    setCustomerSearch]    = useState('');
 
-  const [cart,              setCart]              = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
 
   const [addressMode,       setAddressMode]       = useState<'saved' | 'new'>('saved');
   const [selectedAddressId, setSelectedAddressId] = useState<string>('');
   const [newAddressText,    setNewAddressText]    = useState('');
   const [newAddressLabel,   setNewAddressLabel]   = useState('');
 
-  const [scheduledDate,     setScheduledDate]     = useState(todayStr());
-  const [timeSlot,          setTimeSlot]          = useState(TIME_SLOTS[2]);
-  const [paymentMethod,     setPaymentMethod]     = useState('CASH');
-  const [requireOtp,        setRequireOtp]        = useState(true);
-  const [notes,             setNotes]             = useState('');
+  const [scheduledDate, setScheduledDate] = useState(todayStr());
+  const [timeSlot,      setTimeSlot]      = useState(TIME_SLOTS[2]);
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [requireOtp,    setRequireOtp]    = useState(true);
+  const [notes,         setNotes]         = useState('');
 
-  const [isSubmitting,      setIsSubmitting]      = useState(false);
-  const [errors,            setErrors]            = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
 
   // ── Load data on open ─────────────────────────────────────────────────────
 
@@ -198,7 +194,6 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
   useEffect(() => {
     if (open) {
       loadData();
-      // Reset form
       setSelectedCustomer(null);
       setCart([]);
       setAddressMode('saved');
@@ -214,7 +209,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
     }
   }, [open, loadData]);
 
-  // ── Load customer addresses when customer is selected ─────────────────────
+  // ── Load customer addresses ───────────────────────────────────────────────
 
   useEffect(() => {
     if (!selectedCustomer) return;
@@ -261,26 +256,26 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
   const cartQty = (productId: string) =>
     cart.find(c => c.product.id === productId)?.quantity ?? 0;
 
-  const subtotal     = cart.reduce((s, c) => s + parseFloat(c.product.selling_price) * c.quantity, 0);
-  const deliveryFee  = cart.reduce((max, c) => {
+  const subtotal    = cart.reduce((s, c) => s + parseFloat(c.product.selling_price) * c.quantity, 0);
+  const deliveryFee = cart.reduce((max, c) => {
     const f = parseFloat(c.product.delivery_fee || '0');
     return f > max ? f : max;
   }, 0);
-  const orderTotal   = subtotal + deliveryFee;
+  const orderTotal = subtotal + deliveryFee;
 
   // ── Validation ────────────────────────────────────────────────────────────
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
-    if (!selectedCustomer)     e.customer = 'Select a customer';
-    if (cart.length === 0)     e.cart     = 'Add at least one product';
+    if (!selectedCustomer) e.customer = 'Select a customer';
+    if (cart.length === 0)  e.cart     = 'Add at least one product';
     if (addressMode === 'saved' && !selectedAddressId)
       e.address = 'Select a delivery address';
     if (addressMode === 'new' && !newAddressText.trim())
       e.address = 'Enter a delivery address';
-    if (!scheduledDate)        e.date     = 'Select a delivery date';
-    if (!timeSlot)             e.slot     = 'Select a time slot';
-    if (!paymentMethod)        e.payment  = 'Select a payment method';
+    if (!scheduledDate) e.date    = 'Select a delivery date';
+    if (!timeSlot)      e.slot    = 'Select a time slot';
+    if (!paymentMethod) e.payment = 'Select a payment method';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -306,7 +301,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
         special_instructions: notes,
       };
 
-      const res = await axiosInstance.post('/orders/admin-create/', payload);
+      const res   = await axiosInstance.post('/orders/admin-create/', payload);
       const order = res.data;
 
       toast.success(`Order ${order.order_number} created for ${selectedCustomer!.full_name}`);
@@ -324,7 +319,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
     }
   };
 
-  // ── Filtered customer list ────────────────────────────────────────────────
+  // ── Filtered customers ────────────────────────────────────────────────────
 
   const filteredCustomers = customers.filter(c => {
     const q = customerSearch.toLowerCase();
@@ -339,10 +334,31 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl w-[calc(100vw-1.5rem)] mx-auto rounded-2xl max-h-[92vh] overflow-y-auto p-0 gap-0">
+      {/*
+        ─ Responsive sizing strategy ─
+        • Mobile  (<640px)  : full-screen sheet from the bottom, no border-radius on top
+        • Tablet  (≥640px)  : centred modal, sm:max-w-lg, 90vh
+        • Desktop (≥1024px) : wider centred modal, lg:max-w-2xl
+      */}
+      <DialogContent
+        className={cn(
+          // Base – fill the screen on very small phones
+          'w-full max-w-full rounded-none p-0 gap-0',
+          // Align to bottom on mobile, centre on larger screens
+          'fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:-translate-x-1/2 sm:top-1/2 sm:-translate-y-1/2',
+          // Responsive width & rounding
+          'sm:max-w-lg sm:rounded-2xl lg:max-w-2xl',
+          // Height: tall on mobile (leaves a tiny gap), bounded on tablet+
+          'max-h-[93dvh] sm:max-h-[90vh]',
+          // Allow inner scroll
+          'flex flex-col overflow-hidden',
+        )}
+      >
 
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-background border-b px-6 py-4 rounded-t-2xl">
+        {/* ── Sticky header ── */}
+        <div className="shrink-0 bg-background border-b px-4 sm:px-6 py-3 sm:py-4 rounded-t-2xl">
+          {/* Drag handle on mobile */}
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted sm:hidden" />
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2.5">
               <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
@@ -350,7 +366,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
               </div>
               <div>
                 <p className="font-bold text-base leading-tight">Create Order</p>
-                <p className="text-xs text-muted-foreground font-normal">
+                <p className="text-xs text-muted-foreground font-normal hidden sm:block">
                   Place an order on behalf of a customer
                 </p>
               </div>
@@ -361,381 +377,479 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
           </DialogHeader>
         </div>
 
-        {loadingData ? (
-          <div className="flex items-center justify-center py-20 gap-3 text-muted-foreground">
-            <Loader2 className="h-6 w-6 animate-spin text-primary/50" />
-            <span className="text-sm">Loading…</span>
-          </div>
-        ) : (
-          <div className="px-6 py-5 space-y-6">
-
-            {/* ── Manual order badge ── */}
-            <div className="flex items-start gap-2.5 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
-              <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-800">
-                This creates a <strong>manual order</strong> on behalf of the customer.
-                It will appear in their order history and be assigned to a driver as normal.
-              </p>
+        {/* ── Scrollable body ── */}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          {loadingData ? (
+            <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin text-primary/50" />
+              <span className="text-sm">Loading…</span>
             </div>
+          ) : (
+            <div className="px-4 sm:px-6 py-5 space-y-6">
 
-            {/* ── Step 1: Customer ── */}
-            <div>
-              <SectionLabel step={1} icon={<User className="h-3.5 w-3.5" />} label="Customer" />
-
-              <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    className={cn(
-                      'w-full flex items-center justify-between px-3 py-3 rounded-xl border text-left transition-colors',
-                      selectedCustomer
-                        ? 'border-primary/40 bg-primary/5'
-                        : 'border-border hover:border-primary/30',
-                      errors.customer && 'border-destructive',
-                    )}
-                  >
-                    {selectedCustomer ? (
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 font-bold text-primary text-sm">
-                          {selectedCustomer.full_name[0]}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">{selectedCustomer.full_name}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Phone className="h-2.5 w-2.5" />{selectedCustomer.phone_number}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">Search customer…</span>
-                    )}
-                    <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[400px] p-0 rounded-xl" align="start">
-                  <Command>
-                    <CommandInput
-                      placeholder="Search by name or phone…"
-                      value={customerSearch}
-                      onValueChange={setCustomerSearch}
-                    />
-                    <CommandList className="max-h-64">
-                      <CommandEmpty>No customers found.</CommandEmpty>
-                      <CommandGroup>
-                        {filteredCustomers.map(c => (
-                          <CommandItem
-                            key={c.id}
-                            value={c.id}
-                            onSelect={() => {
-                              setSelectedCustomer(c);
-                              setCustomerOpen(false);
-                              setCustomerSearch('');
-                            }}
-                            className="flex items-center gap-3 px-3 py-2.5"
-                          >
-                            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 font-semibold text-sm">
-                              {c.full_name[0]}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{c.full_name}</p>
-                              <p className="text-xs text-muted-foreground">{c.phone_number}</p>
-                            </div>
-                            {selectedCustomer?.id === c.id && (
-                              <Check className="h-4 w-4 text-primary shrink-0" />
-                            )}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              {errors.customer && (
-                <p className="text-xs text-destructive mt-1 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />{errors.customer}
+              {/* ── Info banner ── */}
+              <div className="flex items-start gap-2.5 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800 leading-relaxed">
+                  This creates a <strong>manual order</strong> on behalf of the customer.
+                  It will appear in their order history and be assigned to a driver as normal.
                 </p>
-              )}
-            </div>
+              </div>
 
-            {/* ── Step 2: Products ── */}
-            <div>
-              <SectionLabel step={2} icon={<Package className="h-3.5 w-3.5" />} label="Products" />
-              <div className="space-y-2">
-                {products.filter(p => p.is_available).map(product => {
-                  const qty = cartQty(product.id);
-                  const fee = parseFloat(product.delivery_fee || '0');
-                  return (
-                    <div
-                      key={product.id}
+              {/* ── Step 1: Customer ── */}
+              <div>
+                <SectionLabel step={1} icon={<User className="h-3.5 w-3.5" />} label="Customer" />
+
+                <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                  <PopoverTrigger asChild>
+                    <button
                       className={cn(
-                        'flex items-center gap-3 p-3.5 border rounded-xl transition-colors',
-                        qty > 0 ? 'border-primary/40 bg-primary/5' : 'border-border',
+                        'w-full flex items-center justify-between px-3 py-3 rounded-xl border text-left transition-colors',
+                        // Minimum tap target height on mobile
+                        'min-h-[52px]',
+                        selectedCustomer
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border hover:border-primary/30',
+                        errors.customer && 'border-destructive',
                       )}
                     >
-                      <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center shrink-0">
-                        {product.unit === 'LITRES'
-                          ? <Droplets className="h-4 w-4 text-sky-500" />
-                          : <Package  className="h-4 w-4 text-violet-500" />
-                        }
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{product.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <span className="text-xs font-medium text-primary">
-                            KES {parseFloat(product.selling_price).toLocaleString()}
-                          </span>
-                          {fee > 0
-                            ? <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Truck className="h-2.5 w-2.5" />KES {fee.toLocaleString()} delivery</span>
-                            : <span className="text-[10px] text-emerald-600 font-medium flex items-center gap-0.5"><Truck className="h-2.5 w-2.5" />Free delivery</span>
+                      {selectedCustomer ? (
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 font-bold text-primary text-sm">
+                            {selectedCustomer.full_name[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">{selectedCustomer.full_name}</p>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Phone className="h-2.5 w-2.5 shrink-0" />{selectedCustomer.phone_number}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Search customer…</span>
+                      )}
+                      <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
+                    </button>
+                  </PopoverTrigger>
+
+                  {/* Popover adapts to screen width */}
+                  <PopoverContent
+                    className="p-0 rounded-xl w-[min(400px,calc(100vw-2rem))]"
+                    align="start"
+                  >
+                    <Command>
+                      <CommandInput
+                        placeholder="Search by name or phone…"
+                        value={customerSearch}
+                        onValueChange={setCustomerSearch}
+                      />
+                      <CommandList className="max-h-60">
+                        <CommandEmpty>No customers found.</CommandEmpty>
+                        <CommandGroup>
+                          {filteredCustomers.map(c => (
+                            <CommandItem
+                              key={c.id}
+                              value={c.id}
+                              onSelect={() => {
+                                setSelectedCustomer(c);
+                                setCustomerOpen(false);
+                                setCustomerSearch('');
+                              }}
+                              className="flex items-center gap-3 px-3 py-3"
+                            >
+                              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 font-semibold text-sm">
+                                {c.full_name[0]}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{c.full_name}</p>
+                                <p className="text-xs text-muted-foreground">{c.phone_number}</p>
+                              </div>
+                              {selectedCustomer?.id === c.id && (
+                                <Check className="h-4 w-4 text-primary shrink-0" />
+                              )}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+
+                {errors.customer && (
+                  <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />{errors.customer}
+                  </p>
+                )}
+              </div>
+
+              {/* ── Step 2: Products ── */}
+              <div>
+                <SectionLabel step={2} icon={<Package className="h-3.5 w-3.5" />} label="Products" />
+                <div className="space-y-2">
+                  {products.filter(p => p.is_available).map(product => {
+                    const qty = cartQty(product.id);
+                    const fee = parseFloat(product.delivery_fee || '0');
+                    return (
+                      <div
+                        key={product.id}
+                        className={cn(
+                          'flex items-center gap-3 p-3 sm:p-3.5 border rounded-xl transition-colors',
+                          qty > 0 ? 'border-primary/40 bg-primary/5' : 'border-border',
+                        )}
+                      >
+                        {/* Icon — hidden on smallest phones to save space */}
+                        <div className="hidden xs:flex h-10 w-10 rounded-xl bg-muted items-center justify-center shrink-0">
+                          {product.unit === 'LITRES'
+                            ? <Droplets className="h-4 w-4 text-sky-500" />
+                            : <Package  className="h-4 w-4 text-violet-500" />
                           }
                         </div>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{product.name}</p>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span className="text-xs font-medium text-primary">
+                              KES {parseFloat(product.selling_price).toLocaleString()}
+                            </span>
+                            {fee > 0 ? (
+                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                <Truck className="h-2.5 w-2.5 shrink-0" />
+                                +KES {fee.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-medium flex items-center gap-0.5">
+                                <Truck className="h-2.5 w-2.5 shrink-0" />
+                                Free delivery
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Quantity controls — larger tap targets */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 rounded-lg"
+                            disabled={qty === 0}
+                            onClick={() => updateCart(product, -1)}
+                          >
+                            <Minus className="h-3.5 w-3.5" />
+                          </Button>
+                          <span className="w-7 text-center text-sm font-bold tabular-nums">{qty}</span>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 rounded-lg"
+                            onClick={() => updateCart(product, 1)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                          disabled={qty === 0}
-                          onClick={() => updateCart(product, -1)}
-                        >
-                          <Minus className="h-3 w-3" />
-                        </Button>
-                        <span className="w-7 text-center text-sm font-bold tabular-nums">{qty}</span>
-                        <Button
-                          variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                          onClick={() => updateCart(product, 1)}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
+                    );
+                  })}
+                </div>
+
+                {errors.cart && (
+                  <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />{errors.cart}
+                  </p>
+                )}
+
+                {/* Cart summary */}
+                {cart.length > 0 && (
+                  <div className="mt-3 rounded-xl border bg-muted/30 p-3 space-y-1.5 text-sm">
+                    {cart.map(c => (
+                      <div key={c.product.id} className="flex justify-between gap-2">
+                        <span className="text-muted-foreground truncate">
+                          {c.product.name} ×{c.quantity}
+                        </span>
+                        <span className="font-medium shrink-0">
+                          KES {(parseFloat(c.product.selling_price) * c.quantity).toLocaleString()}
+                        </span>
                       </div>
+                    ))}
+                    <div className="border-t pt-1.5 flex justify-between gap-2">
+                      <span className="text-muted-foreground">Delivery</span>
+                      <span className="shrink-0">
+                        {deliveryFee > 0 ? `KES ${deliveryFee.toLocaleString()}` : 'Free'}
+                      </span>
                     </div>
-                  );
-                })}
+                    <div className="flex justify-between font-bold text-base gap-2">
+                      <span>Total</span>
+                      <span className="shrink-0">KES {orderTotal.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
               </div>
-              {errors.cart && (
-                <p className="text-xs text-destructive mt-1 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />{errors.cart}
-                </p>
-              )}
 
-              {/* Cart summary */}
-              {cart.length > 0 && (
-                <div className="mt-3 rounded-xl border bg-muted/30 p-3 space-y-1.5 text-sm">
-                  {cart.map(c => (
-                    <div key={c.product.id} className="flex justify-between">
-                      <span className="text-muted-foreground">{c.product.name} ×{c.quantity}</span>
-                      <span className="font-medium">KES {(parseFloat(c.product.selling_price) * c.quantity).toLocaleString()}</span>
-                    </div>
-                  ))}
-                  <div className="border-t pt-1.5 flex justify-between">
-                    <span className="text-muted-foreground">Delivery</span>
-                    <span>{deliveryFee > 0 ? `KES ${deliveryFee.toLocaleString()}` : 'Free'}</span>
+              {/* ── Step 3: Delivery Address ── */}
+              <div>
+                <SectionLabel step={3} icon={<MapPin className="h-3.5 w-3.5" />} label="Delivery Address" />
+
+                {selectedCustomer && (selectedCustomer.addresses ?? []).length > 0 && (
+                  <div className="flex gap-2 mb-3">
+                    {(['saved', 'new'] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setAddressMode(m)}
+                        className={cn(
+                          'flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border transition-colors',
+                          // Minimum tap target
+                          'min-h-[40px]',
+                          addressMode === m
+                            ? 'bg-foreground text-background border-foreground'
+                            : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border',
+                        )}
+                      >
+                        {m === 'saved' ? 'Saved addresses' : 'New address'}
+                      </button>
+                    ))}
                   </div>
-                  <div className="flex justify-between font-bold text-base">
-                    <span>Total</span>
-                    <span>KES {orderTotal.toLocaleString()}</span>
+                )}
+
+                {addressMode === 'saved' && (selectedCustomer?.addresses ?? []).length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedCustomer!.addresses.map(addr => (
+                      <button
+                        key={addr.id}
+                        onClick={() => setSelectedAddressId(addr.id)}
+                        className={cn(
+                          'w-full flex items-start gap-3 p-3 border rounded-xl text-left transition-colors',
+                          'min-h-[52px]',
+                          selectedAddressId === addr.id
+                            ? 'border-primary/40 bg-primary/5'
+                            : 'border-border hover:bg-muted/30',
+                        )}
+                      >
+                        <MapPin className={cn(
+                          'h-4 w-4 shrink-0 mt-0.5',
+                          selectedAddressId === addr.id ? 'text-primary' : 'text-muted-foreground',
+                        )} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{addr.label}</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{addr.address}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {addr.is_default && (
+                            <Badge variant="secondary" className="text-[10px]">Default</Badge>
+                          )}
+                          {selectedAddressId === addr.id && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Enter delivery address"
+                      value={newAddressText}
+                      onChange={e => setNewAddressText(e.target.value)}
+                      className={cn('h-11', errors.address && 'border-destructive')}
+                    />
+                    <Input
+                      placeholder='Label e.g. "Home", "Office" (optional)'
+                      value={newAddressLabel}
+                      onChange={e => setNewAddressLabel(e.target.value)}
+                      className="h-10 text-sm"
+                    />
+                  </div>
+                )}
+
+                {errors.address && (
+                  <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />{errors.address}
+                  </p>
+                )}
+                {!selectedCustomer && (
+                  <p className="text-xs text-muted-foreground italic mt-1">
+                    Select a customer first to see their saved addresses.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Step 4: Schedule ── */}
+              <div>
+                <SectionLabel step={4} icon={<Calendar className="h-3.5 w-3.5" />} label="Delivery Schedule" />
+                {/*
+                  Stack on mobile, side-by-side on sm+.
+                  Each field takes full width on phone so the date picker
+                  has enough room to be usable.
+                */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3" />Date
+                    </Label>
+                    <Input
+                      type="date"
+                      value={scheduledDate}
+                      min={todayStr()}
+                      onChange={e => setScheduledDate(e.target.value)}
+                      className={cn('h-11', errors.date && 'border-destructive')}
+                    />
+                    {errors.date && (
+                      <p className="text-xs text-destructive flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 shrink-0" />{errors.date}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Clock className="h-3 w-3" />Time slot
+                    </Label>
+                    <Select value={timeSlot} onValueChange={setTimeSlot}>
+                      <SelectTrigger className="h-11">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TIME_SLOTS.map(slot => (
+                          <SelectItem key={slot} value={slot}>{slot}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.slot && (
+                      <p className="text-xs text-destructive flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 shrink-0" />{errors.slot}
+                      </p>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* ── Step 3: Delivery Address ── */}
-            <div>
-              <SectionLabel step={3} icon={<MapPin className="h-3.5 w-3.5" />} label="Delivery Address" />
-
-              {selectedCustomer && (selectedCustomer.addresses ?? []).length > 0 && (
-                <div className="flex gap-2 mb-3">
-                  {(['saved', 'new'] as const).map(m => (
+              {/* ── Step 5: Payment ── */}
+              <div>
+                <SectionLabel step={5} icon={<CreditCard className="h-3.5 w-3.5" />} label="Payment Method" />
+                {/*
+                  2-col grid on all sizes — each tile is compact enough
+                  to fit two per row even on narrow phones.
+                */}
+                <div className="grid grid-cols-2 gap-2">
+                  {PAYMENT_METHODS.map(m => (
                     <button
-                      key={m}
-                      onClick={() => setAddressMode(m)}
+                      key={m.value}
+                      onClick={() => setPaymentMethod(m.value)}
                       className={cn(
-                        'flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors',
-                        addressMode === m
-                          ? 'bg-foreground text-background border-foreground'
-                          : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border',
-                      )}
-                    >
-                      {m === 'saved' ? 'Saved addresses' : 'New address'}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {addressMode === 'saved' && (selectedCustomer?.addresses ?? []).length > 0 ? (
-                <div className="space-y-2">
-                  {selectedCustomer!.addresses.map(addr => (
-                    <button
-                      key={addr.id}
-                      onClick={() => setSelectedAddressId(addr.id)}
-                      className={cn(
-                        'w-full flex items-start gap-3 p-3 border rounded-xl text-left transition-colors',
-                        selectedAddressId === addr.id
+                        'flex flex-col items-start gap-1.5 p-3 border rounded-xl text-left transition-colors',
+                        'min-h-[72px]',
+                        paymentMethod === m.value
                           ? 'border-primary/40 bg-primary/5'
                           : 'border-border hover:bg-muted/30',
                       )}
                     >
-                      <MapPin className={cn(
-                        'h-4 w-4 shrink-0 mt-0.5',
-                        selectedAddressId === addr.id ? 'text-primary' : 'text-muted-foreground',
-                      )} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">{addr.label}</p>
-                        <p className="text-xs text-muted-foreground truncate">{addr.address}</p>
+                      <div className="flex items-center justify-between w-full">
+                        {m.icon}
+                        {paymentMethod === m.value && (
+                          <Check className="h-3.5 w-3.5 text-primary" />
+                        )}
                       </div>
-                      {addr.is_default && <Badge variant="secondary" className="text-[10px] shrink-0">Default</Badge>}
-                      {selectedAddressId === addr.id && <Check className="h-4 w-4 text-primary shrink-0 mt-0.5" />}
+                      <div>
+                        <p className="text-sm font-semibold leading-tight">{m.label}</p>
+                        <p className="text-[10px] text-muted-foreground">{m.sublabel}</p>
+                      </div>
                     </button>
                   ))}
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <Input
-                    placeholder="Enter delivery address"
-                    value={newAddressText}
-                    onChange={e => setNewAddressText(e.target.value)}
-                    className={cn('h-10', errors.address && 'border-destructive')}
-                  />
-                  <Input
-                    placeholder='Label e.g. "Home", "Office" (optional)'
-                    value={newAddressLabel}
-                    onChange={e => setNewAddressLabel(e.target.value)}
-                    className="h-9 text-sm"
-                  />
-                </div>
-              )}
-              {errors.address && (
-                <p className="text-xs text-destructive mt-1 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />{errors.address}
-                </p>
-              )}
-              {!selectedCustomer && (
-                <p className="text-xs text-muted-foreground italic mt-1">Select a customer first to see their saved addresses.</p>
-              )}
-            </div>
-
-            {/* ── Step 4: Schedule ── */}
-            <div>
-              <SectionLabel step={4} icon={<Calendar className="h-3.5 w-3.5" />} label="Delivery Schedule" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Calendar className="h-3 w-3" />Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={scheduledDate}
-                    min={todayStr()}
-                    onChange={e => setScheduledDate(e.target.value)}
-                    className={cn('h-10', errors.date && 'border-destructive')}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Clock className="h-3 w-3" />Time Slot
-                  </Label>
-                  <Select value={timeSlot} onValueChange={setTimeSlot}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TIME_SLOTS.map(slot => (
-                        <SelectItem key={slot} value={slot}>{slot}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {errors.payment && (
+                  <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />{errors.payment}
+                  </p>
+                )}
               </div>
-            </div>
 
-            {/* ── Step 5: Payment ── */}
-            <div>
-              <SectionLabel step={5} icon={<CreditCard className="h-3.5 w-3.5" />} label="Payment Method" />
-              <div className="grid grid-cols-2 gap-2">
-                {PAYMENT_METHODS.map(m => (
-                  <button
-                    key={m.value}
-                    onClick={() => setPaymentMethod(m.value)}
-                    className={cn(
-                      'flex items-center gap-2.5 p-3 border rounded-xl text-left transition-colors',
-                      paymentMethod === m.value
-                        ? 'border-primary/40 bg-primary/5'
-                        : 'border-border hover:bg-muted/30',
-                    )}
-                  >
-                    {m.icon}
-                    <span className="text-sm font-medium">{m.label}</span>
-                    {paymentMethod === m.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* ── Step 6: OTP setting ── */}
-            <div className="rounded-xl border overflow-hidden">
-              <div className="px-4 py-3 flex items-center justify-between bg-muted/20">
-                <div className="flex items-center gap-2.5">
-                  {requireOtp
-                    ? <Shield    className="h-4 w-4 text-emerald-600" />
-                    : <ShieldOff className="h-4 w-4 text-muted-foreground" />
-                  }
-                  <div>
-                    <p className="text-sm font-semibold">Delivery Verification (OTP)</p>
-                    <p className="text-xs text-muted-foreground">
-                      {requireOtp
-                        ? 'Customer will receive a code to confirm receipt'
-                        : 'Driver can complete delivery without customer code'
-                      }
+              {/* ── Step 6: OTP ── */}
+              <div className="rounded-xl border overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between gap-4 bg-muted/20">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {requireOtp
+                      ? <Shield    className="h-4 w-4 text-emerald-600 shrink-0" />
+                      : <ShieldOff className="h-4 w-4 text-muted-foreground shrink-0" />
+                    }
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">Delivery Verification (OTP)</p>
+                      <p className="text-xs text-muted-foreground leading-snug">
+                        {requireOtp
+                          ? 'Customer receives a code to confirm receipt'
+                          : 'Driver can complete delivery without a code'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={requireOtp}
+                    onCheckedChange={setRequireOtp}
+                    className="shrink-0"
+                  />
+                </div>
+                {!requireOtp && (
+                  <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100">
+                    <p className="text-[11px] text-amber-700 flex items-start gap-1.5 leading-relaxed">
+                      <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+                      OTP disabled — suitable for phone/WhatsApp orders where the customer has no
+                      app access. Empty bottle collection will still be recorded.
                     </p>
                   </div>
-                </div>
-                <Switch
-                  checked={requireOtp}
-                  onCheckedChange={setRequireOtp}
+                )}
+              </div>
+
+              {/* ── Notes ── */}
+              <div className="space-y-1.5 pb-2">
+                <Label className="text-sm font-medium flex items-center gap-1.5">
+                  Special Instructions
+                  <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  placeholder="e.g. Call before arriving / leave at gate / 2 empties to collect"
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  rows={3}
+                  className="resize-none"
                 />
               </div>
-              {!requireOtp && (
-                <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100">
-                  <p className="text-[11px] text-amber-700 flex items-center gap-1.5">
-                    <AlertCircle className="h-3 w-3 shrink-0" />
-                    OTP disabled — suitable for phone/WhatsApp orders where customer has no app access.
-                    Empty bottle collection will still be recorded.
-                  </p>
-                </div>
+
+            </div>
+          )}
+        </div>
+
+        {/* ── Sticky footer ── */}
+        <div className="shrink-0 bg-background border-t px-4 sm:px-6 py-3 sm:py-4 rounded-b-2xl">
+          {/* Show running total when cart has items */}
+          {cart.length > 0 && (
+            <div className="flex items-center justify-between text-sm mb-3 px-0.5">
+              <span className="text-muted-foreground">
+                {cart.reduce((n, c) => n + c.quantity, 0)} item{cart.reduce((n, c) => n + c.quantity, 0) !== 1 ? 's' : ''}
+              </span>
+              <span className="font-bold">KES {orderTotal.toLocaleString()}</span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="flex-1 h-11"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || loadingData}
+              className="flex-1 h-11 gap-2"
+            >
+              {isSubmitting ? (
+                <><Loader2 className="h-4 w-4 animate-spin" />Creating…</>
+              ) : (
+                <><ShoppingCart className="h-4 w-4" />Create Order</>
               )}
-            </div>
-
-            {/* ── Notes ── */}
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium flex items-center gap-1.5">
-                Special Instructions
-                <span className="text-xs text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Textarea
-                placeholder="e.g. Call before arriving / leave at gate / 2 empties to collect"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                rows={2}
-              />
-            </div>
-
+            </Button>
           </div>
-        )}
+          {/* Bottom safe-area padding for iOS home indicator */}
+          <div className="h-safe-area-inset-bottom sm:hidden" />
+        </div>
 
-        {/* Footer */}
-        <DialogFooter className="sticky bottom-0 bg-background border-t px-6 py-4 rounded-b-2xl flex gap-2">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting} className="flex-1">
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || loadingData}
-            className="flex-1 gap-2"
-          >
-            {isSubmitting ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />Creating Order…</>
-            ) : (
-              <><ShoppingCart className="h-4 w-4" />Create Order</>
-            )}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
