@@ -79,11 +79,13 @@ const clientAdminNav: NavItem[] = [
 ];
 
 const accountantNav: NavItem[] = [
-  { label: 'Invoices',     path: '/client/accounts/invoices',    icon: FileText    },
-  { label: 'Customers',    path: '/client/accounts/customers',   icon: Users       },
-  { label: 'Reports',      path: '/client/accounts/reports',     icon: TrendingUp  },
-  { label: 'Accounts',     path: '/client/accounts/settings',    icon: Calculator  },
-  { label: 'Direct Sales', path: '/client/accounts/direct-sales',icon: ShoppingBag },
+  { label: 'Invoices',      path: '/client/accounts/invoices',      icon: FileText    },
+  { label: 'Customers',     path: '/client/accounts/customers',     icon: Users       },
+  { label: 'Reports',       path: '/client/accounts/reports',       icon: TrendingUp  },
+  { label: 'Accounts',      path: '/client/accounts/settings',      icon: Calculator  },
+  { label: 'Direct Sales',  path: '/client/accounts/direct-sales',  icon: ShoppingBag },
+  { label: 'Bottle Audit',  path: '/client/accounts/bottle-audit',  icon: Package     }, // ← add
+  { label: 'Deliveries',    path: '/client/accounts/deliveries',    icon: Truck       }, // ← add
 ];
 
 const driverNav: NavItem[] = [

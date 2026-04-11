@@ -40,6 +40,8 @@ export const ROUTES = {
     INVOICES:  '/client/accounts/invoices',
     REPORTS:   '/client/accounts/reports',
     SETTINGS:  '/client/accounts/settings',
+    BOTTLE_AUDIT:  '/client/accounts/bottle-audit',
+    DELIVERIES:    '/client/accounts/deliveries',
   },
 
   // Site Manager routes — manages a physical depot/branch

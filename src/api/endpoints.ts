@@ -128,4 +128,8 @@ export const API_ENDPOINTS = {
     NOTIFICATIONS: '/system/notifications/',
     MAINTENANCE: '/system/maintenance/',
   },
+
+  DRIVERS: {
+    BOTTLE_AUDIT: '/drivers/bottle-audit/',
+  },
 } as const;

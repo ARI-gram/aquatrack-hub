@@ -23,6 +23,7 @@ from apps.authentication.employee_views import (
     EmployeeReactivateView,
     EmployeeResetPasswordView,
 )
+from apps.deliveries.views_audit import DriverBottleAuditView
 
 app_name = 'authentication'
 
@@ -63,4 +64,7 @@ urlpatterns = [
     path('employees/<uuid:pk>/reset-password/',
          EmployeeResetPasswordView.as_view(),
          name='employee-reset-password'),
+
+    path('drivers/bottle-audit/', DriverBottleAuditView.as_view(),
+         name='driver-bottle-audit'),
 ]

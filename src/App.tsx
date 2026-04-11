@@ -45,6 +45,7 @@ import AccountsReportsPage     from '@/pages/accounts/ReportsPage';
 import InvoicesListPage        from '@/pages/accounts/InvoicesListPage';
 import InvoiceDetailPage       from '@/pages/accounts/InvoiceDetailPage';
 import AccountingDirectSalesPage from "@/pages/accounts/DirectSalesPage";
+import BottleAuditPage         from "@/pages/accounts/BottleAuditPage";
 
 // Site Manager Pages
 import { SiteManagerDashboard } from "@/pages/manager/SiteManagerDashboard";
@@ -162,6 +163,7 @@ const AppRoutes = () => (
       <Route path="/client/accounts/customers"               element={<AccountantCustomersPage />} />
       <Route path="/client/accounts/customers/:id/statement" element={<CustomerStatementPage />} />
       <Route path="/client/accounts/direct-sales"            element={<AccountingDirectSalesPage />} />
+      <Route path="/client/accounts/bottle-audit"            element={<BottleAuditPage />} />
     </Route>
 
     {/* ── Site Manager ── */}
