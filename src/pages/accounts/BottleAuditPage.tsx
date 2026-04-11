@@ -1,3 +1,4 @@
+// /src/pages/accounts/BottleAuditPage.tsx
 /**
  * Bottle Audit Page
  * Role: Accountant / Client Admin
@@ -280,7 +281,7 @@ const BottleAuditPage: React.FC = () => {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 4 }).map((_, i) => <RowSkeleton key={i} />)
-              ) : data?.drivers.length === 0 ? (
+              ) : !data || data.drivers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground text-sm">
                     No driver data found for this period.

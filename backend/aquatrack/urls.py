@@ -13,6 +13,8 @@ from apps.notifications.urls import (
     client_notification_urls,
 )
 
+from apps.deliveries.views_audit import DriverBottleAuditView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
 
@@ -67,6 +69,13 @@ urlpatterns = [
 
     # Site manager      →  /api/manager/drivers/
     path('api/manager/',    include('apps.deliveries.manager_urls')),
+
+    # Misc utilities    →  /api/deliveries/health/
+    path('api/deliveries/', include('apps.deliveries.urls')),
+
+    # Bottle audit      →  /api/drivers/bottle-audit/
+    path('api/drivers/bottle-audit/',
+         DriverBottleAuditView.as_view(), name='driver-bottle-audit'),
 ]
 
 if settings.DEBUG:
