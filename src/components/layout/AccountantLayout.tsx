@@ -57,6 +57,12 @@ const NAV_ITEMS: NavItem[] = [
     sublabel: 'One-off sales',
   },
   {
+    label:    'Bottle Audit',
+    path:     ROUTES.ACCOUNTANT.BOTTLE_AUDIT,
+    icon:     Calculator,
+    sublabel: 'Bottle inventory',
+  },
+  {
     label:    'Customers',
     path:     '/client/accounts/customers',
     icon:     Users,
