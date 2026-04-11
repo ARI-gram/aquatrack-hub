@@ -2,8 +2,9 @@
 apps/deliveries/views_audit.py
 
 GET /api/drivers/bottle-audit/
-    ?period=week|month|year
-    &driver_id=<uuid>   (optional — omit to get all drivers)
+    ?date_from=YYYY-MM-DD   (optional — defaults to 30 days ago)
+    &date_to=YYYY-MM-DD     (optional — defaults to today)
+    &driver_id=<uuid>       (optional — omit to get all drivers)
 
 Permission: client_admin, accountant, super_admin
 """
@@ -38,8 +39,8 @@ class DriverBottleAuditView(APIView):
     Response shape:
     {
         "period":    "month",
-        "date_from": "2026-03-12",
-        "date_to":   "2026-04-11",
+        "date_from": "2026-04-01",
+        "date_to":   "2026-04-30",
         "drivers": [
             {
                 "driver_id":          "uuid",
@@ -70,7 +71,6 @@ class DriverBottleAuditView(APIView):
 
     def get(self, request):
         # ── Date range ────────────────────────────────────────────────────────
-        from datetime import date as date_type
         now = timezone.now()
         date_from_str = request.query_params.get('date_from')
         date_to_str = request.query_params.get('date_to')
@@ -79,14 +79,31 @@ class DriverBottleAuditView(APIView):
             date_from = timezone.make_aware(
                 timezone.datetime.strptime(date_from_str, '%Y-%m-%d')
             ) if date_from_str else now - timedelta(days=30)
+        except ValueError:
+            date_from = now - timedelta(days=30)
+
+        try:
             date_to = timezone.make_aware(
                 timezone.datetime.strptime(date_to_str, '%Y-%m-%d').replace(
                     hour=23, minute=59, second=59
                 )
             ) if date_to_str else now
         except ValueError:
-            date_from = now - timedelta(days=30)
             date_to = now
+
+        # ── Compute a human-readable period label ─────────────────────────────
+        delta = (date_to.date() - date_from.date()).days
+        if delta == 0:
+            period_label = 'day'
+        elif delta <= 7:
+            period_label = 'week'
+        elif delta <= 31:
+            period_label = 'month'
+        elif delta <= 366:
+            period_label = 'year'
+        else:
+            period_label = 'custom'
+
         # ── Scope to this client ──────────────────────────────────────────────
         client = request.user.client
         driver_id = request.query_params.get('driver_id')
@@ -166,9 +183,10 @@ class DriverBottleAuditView(APIView):
         }
 
         return Response({
-            'period':    period,
+            'period':    period_label,                   # FIX: was undefined `period`
             'date_from': date_from.date().isoformat(),
-            'date_to':   now.date().isoformat(),
+            # FIX: was always `now` instead of `date_to`
+            'date_to':   date_to.date().isoformat(),
             'drivers':   results,
             'totals':    totals,
         })
