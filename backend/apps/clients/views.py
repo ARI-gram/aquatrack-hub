@@ -166,15 +166,25 @@ class ClientListCreateView(generics.ListCreateAPIView):
 
 # ─── Detail / Update / Delete ─────────────────────────────────────────────────
 
-class ClientDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    GET    /api/clients/{id}/   – full client details
-    PUT    /api/clients/{id}/   – full update
-    PATCH  /api/clients/{id}/   – partial update
-    DELETE /api/clients/{id}/   – soft-delete (sets status to cancelled)
-    """
+# apps/clients/views.py
 
-    permission_classes = [IsSuperAdmin]
+class IsClientAdminOrSuperAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ('super_admin', 'client_admin')
+        )
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.role == 'super_admin':
+            return True
+        # Client admin can only access their own client
+        return str(obj.id) == str(request.user.client_id)
+
+
+class ClientDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsClientAdminOrSuperAdmin]  # ← updated
     queryset = Client.objects.all()
 
     def get_serializer_class(self):
@@ -183,6 +193,12 @@ class ClientDetailView(generics.RetrieveUpdateDestroyAPIView):
         return ClientSerializer
 
     def destroy(self, request, *args, **kwargs):
+        # Only super admins can delete
+        if request.user.role != 'super_admin':
+            return Response(
+                {'error': 'Permission denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         instance = self.get_object()
         instance.subscription_status = SubscriptionStatus.CANCELLED
         instance.save(update_fields=['subscription_status', 'updated_at'])
@@ -191,8 +207,8 @@ class ClientDetailView(generics.RetrieveUpdateDestroyAPIView):
             status=status.HTTP_200_OK,
         )
 
-
 # ─── Suspend ──────────────────────────────────────────────────────────────────
+
 
 class ClientSuspendView(APIView):
     """

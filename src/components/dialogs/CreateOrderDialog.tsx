@@ -11,7 +11,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button }   from '@/components/ui/button';
@@ -20,6 +19,7 @@ import { Label }    from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch }   from '@/components/ui/switch';
 import { Badge }    from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -45,7 +45,7 @@ import {
   Truck, Calendar, Clock, MapPin, CreditCard,
   ChevronDown, Check, AlertCircle, Package, Droplets,
   Wallet, Banknote, Smartphone, FileText, Shield,
-  ShieldOff, Info,
+  ShieldOff, Info, CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -106,10 +106,10 @@ const TIME_SLOTS = [
 ];
 
 const PAYMENT_METHODS = [
-  { value: 'CASH',   label: 'Cash',    sublabel: 'On delivery',  icon: <Banknote   className="h-5 w-5 text-amber-600"  /> },
-  { value: 'MPESA',  label: 'M-Pesa',  sublabel: 'Mobile money', icon: <Smartphone className="h-5 w-5 text-green-600"  /> },
-  { value: 'WALLET', label: 'Wallet',  sublabel: 'Account bal.', icon: <Wallet     className="h-5 w-5 text-blue-600"   /> },
-  { value: 'CREDIT', label: 'Invoice', sublabel: 'Credit terms', icon: <FileText   className="h-5 w-5 text-purple-600" /> },
+  { value: 'CASH',   label: 'Cash',    sublabel: 'On delivery',  icon: <Banknote   className="h-4 w-4 text-amber-600"  /> },
+  { value: 'MPESA',  label: 'M-Pesa',  sublabel: 'Mobile money', icon: <Smartphone className="h-4 w-4 text-green-600"  /> },
+  { value: 'WALLET', label: 'Wallet',  sublabel: 'Account bal.', icon: <Wallet     className="h-4 w-4 text-blue-600"   /> },
+  { value: 'CREDIT', label: 'Invoice', sublabel: 'Credit terms', icon: <FileText   className="h-4 w-4 text-purple-600" /> },
 ];
 
 function todayStr() {
@@ -118,17 +118,19 @@ function todayStr() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-const SectionLabel: React.FC<{ icon: React.ReactNode; label: string; step: number }> = ({
-  icon, label, step,
+const SectionLabel: React.FC<{ icon: React.ReactNode; label: string; step: number; badge?: string }> = ({
+  icon, label, step, badge,
 }) => (
-  <div className="flex items-center gap-2.5 mb-3">
-    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold shrink-0">
-      {step}
+  <div className="flex items-center gap-2 mb-3">
+    <div className="flex items-center justify-center h-6 w-6 rounded-md bg-muted text-muted-foreground shrink-0">
+      {icon}
     </div>
-    <div className="flex items-center gap-1.5">
-      <span className="text-muted-foreground">{icon}</span>
-      <p className="text-sm font-semibold">{label}</p>
-    </div>
+    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+      {label}
+    </span>
+    {badge && (
+      <Badge variant="secondary" className="text-xs tabular-nums">{badge}</Badge>
+    )}
   </div>
 );
 
@@ -261,7 +263,8 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
     const f = parseFloat(c.product.delivery_fee || '0');
     return f > max ? f : max;
   }, 0);
-  const orderTotal = subtotal + deliveryFee;
+  const orderTotal  = subtotal + deliveryFee;
+  const totalItems  = cart.reduce((n, c) => n + c.quantity, 0);
 
   // ── Validation ────────────────────────────────────────────────────────────
 
@@ -334,63 +337,43 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      {/*
-        ─ Responsive sizing strategy ─
-        • Mobile  (<640px)  : full-screen sheet from the bottom, no border-radius on top
-        • Tablet  (≥640px)  : centred modal, sm:max-w-lg, 90vh
-        • Desktop (≥1024px) : wider centred modal, lg:max-w-2xl
-      */}
-      <DialogContent
-        className={cn(
-          // Base – fill the screen on very small phones
-          'w-full max-w-full rounded-none p-0 gap-0',
-          // Align to bottom on mobile, centre on larger screens
-          'fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:-translate-x-1/2 sm:top-1/2 sm:-translate-y-1/2',
-          // Responsive width & rounding
-          'sm:max-w-lg sm:rounded-2xl lg:max-w-2xl',
-          // Height: tall on mobile (leaves a tiny gap), bounded on tablet+
-          'max-h-[93dvh] sm:max-h-[90vh]',
-          // Allow inner scroll
-          'flex flex-col overflow-hidden',
-        )}
-      >
+      <DialogContent className="sm:max-w-lg lg:max-w-2xl max-h-[92vh] overflow-hidden flex flex-col p-0 gap-0">
 
-        {/* ── Sticky header ── */}
-        <div className="shrink-0 bg-background border-b px-4 sm:px-6 py-3 sm:py-4 rounded-t-2xl">
-          {/* Drag handle on mobile */}
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted sm:hidden" />
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                <ShoppingCart className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <p className="font-bold text-base leading-tight">Create Order</p>
-                <p className="text-xs text-muted-foreground font-normal hidden sm:block">
-                  Place an order on behalf of a customer
-                </p>
-              </div>
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              Create a manual order on behalf of a customer
-            </DialogDescription>
-          </DialogHeader>
+        {/* ── Header ── */}
+        <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-6 pt-6 pb-5 border-b border-border/60 shrink-0">
+          <div className="flex items-start gap-4">
+            <div className="flex items-center justify-center h-12 w-12 rounded-xl shrink-0 bg-primary/10 text-primary border border-primary/20">
+              <ShoppingCart className="h-6 w-6" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <DialogTitle className="text-lg font-semibold">Create Order</DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground mt-0.5">
+                Place a manual order on behalf of a customer
+              </DialogDescription>
+            </div>
+            {cart.length > 0 && (
+              <Badge variant="outline" className="shrink-0 text-xs gap-1.5 self-start mt-0.5">
+                <ShoppingCart className="h-3 w-3" />
+                {totalItems} item{totalItems !== 1 ? 's' : ''}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {/* ── Scrollable body ── */}
-        <div className="flex-1 overflow-y-auto overscroll-contain">
+        <div className="overflow-y-auto flex-1 px-6 py-5">
           {loadingData ? (
             <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin text-primary/50" />
               <span className="text-sm">Loading…</span>
             </div>
           ) : (
-            <div className="px-4 sm:px-6 py-5 space-y-6">
+            <div className="space-y-5">
 
               {/* ── Info banner ── */}
-              <div className="flex items-start gap-2.5 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+              <div className="flex items-start gap-2.5 px-3 py-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
                 <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-800 leading-relaxed">
+                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
                   This creates a <strong>manual order</strong> on behalf of the customer.
                   It will appear in their order history and be assigned to a driver as normal.
                 </p>
@@ -404,22 +387,20 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                   <PopoverTrigger asChild>
                     <button
                       className={cn(
-                        'w-full flex items-center justify-between px-3 py-3 rounded-xl border text-left transition-colors',
-                        // Minimum tap target height on mobile
-                        'min-h-[52px]',
+                        'w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-left transition-colors h-11',
                         selectedCustomer
                           ? 'border-primary/40 bg-primary/5'
-                          : 'border-border hover:border-primary/30',
+                          : 'border-border hover:border-primary/30 bg-background',
                         errors.customer && 'border-destructive',
                       )}
                     >
                       {selectedCustomer ? (
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 font-bold text-primary text-sm">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 font-bold text-primary text-xs">
                             {selectedCustomer.full_name[0]}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold truncate">{selectedCustomer.full_name}</p>
+                            <p className="text-sm font-semibold truncate leading-tight">{selectedCustomer.full_name}</p>
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Phone className="h-2.5 w-2.5 shrink-0" />{selectedCustomer.phone_number}
                             </p>
@@ -432,7 +413,6 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                     </button>
                   </PopoverTrigger>
 
-                  {/* Popover adapts to screen width */}
                   <PopoverContent
                     className="p-0 rounded-xl w-[min(400px,calc(100vw-2rem))]"
                     align="start"
@@ -443,7 +423,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                         value={customerSearch}
                         onValueChange={setCustomerSearch}
                       />
-                      <CommandList className="max-h-60">
+                      <CommandList className="max-h-56">
                         <CommandEmpty>No customers found.</CommandEmpty>
                         <CommandGroup>
                           {filteredCustomers.map(c => (
@@ -455,7 +435,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                                 setCustomerOpen(false);
                                 setCustomerSearch('');
                               }}
-                              className="flex items-center gap-3 px-3 py-3"
+                              className="flex items-center gap-3 px-3 py-2.5"
                             >
                               <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 font-semibold text-sm">
                                 {c.full_name[0]}
@@ -482,9 +462,17 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                 )}
               </div>
 
+              <Separator />
+
               {/* ── Step 2: Products ── */}
               <div>
-                <SectionLabel step={2} icon={<Package className="h-3.5 w-3.5" />} label="Products" />
+                <SectionLabel
+                  step={2}
+                  icon={<Package className="h-3.5 w-3.5" />}
+                  label="Products"
+                  badge={cart.length > 0 ? `${totalItems} added` : undefined}
+                />
+
                 <div className="space-y-2">
                   {products.filter(p => p.is_available).map(product => {
                     const qty = cartQty(product.id);
@@ -493,12 +481,11 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                       <div
                         key={product.id}
                         className={cn(
-                          'flex items-center gap-3 p-3 sm:p-3.5 border rounded-xl transition-colors',
+                          'flex items-center gap-3 p-3 border rounded-lg transition-colors',
                           qty > 0 ? 'border-primary/40 bg-primary/5' : 'border-border',
                         )}
                       >
-                        {/* Icon — hidden on smallest phones to save space */}
-                        <div className="hidden xs:flex h-10 w-10 rounded-xl bg-muted items-center justify-center shrink-0">
+                        <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
                           {product.unit === 'LITRES'
                             ? <Droplets className="h-4 w-4 text-sky-500" />
                             : <Package  className="h-4 w-4 text-violet-500" />
@@ -525,25 +512,24 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                           </div>
                         </div>
 
-                        {/* Quantity controls — larger tap targets */}
                         <div className="flex items-center gap-1.5 shrink-0">
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-9 w-9 rounded-lg"
+                            className="h-8 w-8 rounded-lg"
                             disabled={qty === 0}
                             onClick={() => updateCart(product, -1)}
                           >
-                            <Minus className="h-3.5 w-3.5" />
+                            <Minus className="h-3 w-3" />
                           </Button>
-                          <span className="w-7 text-center text-sm font-bold tabular-nums">{qty}</span>
+                          <span className="w-6 text-center text-sm font-bold tabular-nums">{qty}</span>
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-9 w-9 rounded-lg"
+                            className="h-8 w-8 rounded-lg"
                             onClick={() => updateCart(product, 1)}
                           >
-                            <Plus className="h-3.5 w-3.5" />
+                            <Plus className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
@@ -559,30 +545,38 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
 
                 {/* Cart summary */}
                 {cart.length > 0 && (
-                  <div className="mt-3 rounded-xl border bg-muted/30 p-3 space-y-1.5 text-sm">
-                    {cart.map(c => (
-                      <div key={c.product.id} className="flex justify-between gap-2">
-                        <span className="text-muted-foreground truncate">
-                          {c.product.name} ×{c.quantity}
-                        </span>
-                        <span className="font-medium shrink-0">
-                          KES {(parseFloat(c.product.selling_price) * c.quantity).toLocaleString()}
-                        </span>
+                  <div className="mt-3 rounded-lg border border-border/60 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-muted/40 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                        <span className="text-xs font-semibold">{totalItems} item{totalItems !== 1 ? 's' : ''} in cart</span>
                       </div>
-                    ))}
-                    <div className="border-t pt-1.5 flex justify-between gap-2">
-                      <span className="text-muted-foreground">Delivery</span>
-                      <span className="shrink-0">
-                        {deliveryFee > 0 ? `KES ${deliveryFee.toLocaleString()}` : 'Free'}
-                      </span>
                     </div>
-                    <div className="flex justify-between font-bold text-base gap-2">
-                      <span>Total</span>
-                      <span className="shrink-0">KES {orderTotal.toLocaleString()}</span>
+                    <div className="divide-y divide-border/40">
+                      {cart.map(c => (
+                        <div key={c.product.id} className="flex justify-between gap-2 px-3 py-2">
+                          <span className="text-xs text-muted-foreground truncate">
+                            {c.product.name} ×{c.quantity}
+                          </span>
+                          <span className="text-xs font-medium shrink-0">
+                            KES {(parseFloat(c.product.selling_price) * c.quantity).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="px-3 py-2 bg-primary/5 border-t border-primary/20 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        Delivery: {deliveryFee > 0 ? `KES ${deliveryFee.toLocaleString()}` : 'Free'}
+                      </span>
+                      <span className="text-sm font-bold">
+                        Total: KES {orderTotal.toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 )}
               </div>
+
+              <Separator />
 
               {/* ── Step 3: Delivery Address ── */}
               <div>
@@ -595,9 +589,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                         key={m}
                         onClick={() => setAddressMode(m)}
                         className={cn(
-                          'flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border transition-colors',
-                          // Minimum tap target
-                          'min-h-[40px]',
+                          'flex-1 py-2 px-3 rounded-lg text-xs font-semibold border transition-colors h-9',
                           addressMode === m
                             ? 'bg-foreground text-background border-foreground'
                             : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border',
@@ -616,8 +608,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                         key={addr.id}
                         onClick={() => setSelectedAddressId(addr.id)}
                         className={cn(
-                          'w-full flex items-start gap-3 p-3 border rounded-xl text-left transition-colors',
-                          'min-h-[52px]',
+                          'w-full flex items-start gap-3 p-3 border rounded-lg text-left transition-colors',
                           selectedAddressId === addr.id
                             ? 'border-primary/40 bg-primary/5'
                             : 'border-border hover:bg-muted/30',
@@ -648,7 +639,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                       placeholder="Enter delivery address"
                       value={newAddressText}
                       onChange={e => setNewAddressText(e.target.value)}
-                      className={cn('h-11', errors.address && 'border-destructive')}
+                      className={cn('h-10', errors.address && 'border-destructive')}
                     />
                     <Input
                       placeholder='Label e.g. "Home", "Office" (optional)'
@@ -671,14 +662,11 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                 )}
               </div>
 
+              <Separator />
+
               {/* ── Step 4: Schedule ── */}
               <div>
                 <SectionLabel step={4} icon={<Calendar className="h-3.5 w-3.5" />} label="Delivery Schedule" />
-                {/*
-                  Stack on mobile, side-by-side on sm+.
-                  Each field takes full width on phone so the date picker
-                  has enough room to be usable.
-                */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -689,7 +677,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                       value={scheduledDate}
                       min={todayStr()}
                       onChange={e => setScheduledDate(e.target.value)}
-                      className={cn('h-11', errors.date && 'border-destructive')}
+                      className={cn('h-10', errors.date && 'border-destructive')}
                     />
                     {errors.date && (
                       <p className="text-xs text-destructive flex items-center gap-1">
@@ -702,7 +690,7 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                       <Clock className="h-3 w-3" />Time slot
                     </Label>
                     <Select value={timeSlot} onValueChange={setTimeSlot}>
-                      <SelectTrigger className="h-11">
+                      <SelectTrigger className="h-10">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -720,21 +708,18 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                 </div>
               </div>
 
+              <Separator />
+
               {/* ── Step 5: Payment ── */}
               <div>
                 <SectionLabel step={5} icon={<CreditCard className="h-3.5 w-3.5" />} label="Payment Method" />
-                {/*
-                  2-col grid on all sizes — each tile is compact enough
-                  to fit two per row even on narrow phones.
-                */}
                 <div className="grid grid-cols-2 gap-2">
                   {PAYMENT_METHODS.map(m => (
                     <button
                       key={m.value}
                       onClick={() => setPaymentMethod(m.value)}
                       className={cn(
-                        'flex flex-col items-start gap-1.5 p-3 border rounded-xl text-left transition-colors',
-                        'min-h-[72px]',
+                        'flex flex-col items-start gap-1.5 p-3 border rounded-lg text-left transition-colors',
                         paymentMethod === m.value
                           ? 'border-primary/40 bg-primary/5'
                           : 'border-border hover:bg-muted/30',
@@ -760,8 +745,10 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                 )}
               </div>
 
+              <Separator />
+
               {/* ── Step 6: OTP ── */}
-              <div className="rounded-xl border overflow-hidden">
+              <div className="rounded-lg border overflow-hidden">
                 <div className="px-4 py-3 flex items-center justify-between gap-4 bg-muted/20">
                   <div className="flex items-center gap-2.5 min-w-0">
                     {requireOtp
@@ -785,8 +772,8 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                   />
                 </div>
                 {!requireOtp && (
-                  <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100">
-                    <p className="text-[11px] text-amber-700 flex items-start gap-1.5 leading-relaxed">
+                  <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-100 dark:border-amber-800">
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5 leading-relaxed">
                       <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
                       OTP disabled — suitable for phone/WhatsApp orders where the customer has no
                       app access. Empty bottle collection will still be recorded.
@@ -797,9 +784,9 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
 
               {/* ── Notes ── */}
               <div className="space-y-1.5 pb-2">
-                <Label className="text-sm font-medium flex items-center gap-1.5">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   Special Instructions
-                  <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                  <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">(optional)</span>
                 </Label>
                 <Textarea
                   placeholder="e.g. Call before arriving / leave at gate / 2 empties to collect"
@@ -815,39 +802,38 @@ export const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
         </div>
 
         {/* ── Sticky footer ── */}
-        <div className="shrink-0 bg-background border-t px-4 sm:px-6 py-3 sm:py-4 rounded-b-2xl">
-          {/* Show running total when cart has items */}
-          {cart.length > 0 && (
-            <div className="flex items-center justify-between text-sm mb-3 px-0.5">
-              <span className="text-muted-foreground">
-                {cart.reduce((n, c) => n + c.quantity, 0)} item{cart.reduce((n, c) => n + c.quantity, 0) !== 1 ? 's' : ''}
-              </span>
-              <span className="font-bold">KES {orderTotal.toLocaleString()}</span>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="flex-1 h-11"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting || loadingData}
-              className="flex-1 h-11 gap-2"
-            >
-              {isSubmitting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" />Creating…</>
-              ) : (
-                <><ShoppingCart className="h-4 w-4" />Create Order</>
-              )}
-            </Button>
+        <div className="border-t border-border/60 bg-muted/30 px-6 py-4 flex items-center gap-3 shrink-0">
+          <div className="flex-1 hidden sm:block">
+            {cart.length > 0 ? (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {totalItems} item{totalItems !== 1 ? 's' : ''} · KES {orderTotal.toLocaleString()}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Add at least one product to continue
+              </p>
+            )}
           </div>
-          {/* Bottom safe-area padding for iOS home indicator */}
-          <div className="h-safe-area-inset-bottom sm:hidden" />
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="min-w-20"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || loadingData}
+            className="min-w-40 gap-2"
+          >
+            {isSubmitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" />Creating…</>
+            ) : (
+              <><ShoppingCart className="h-4 w-4" />Create Order</>
+            )}
+          </Button>
         </div>
 
       </DialogContent>
