@@ -18,7 +18,7 @@ import { ROUTES } from '@/constants/routes';
 import {
   FileText, TrendingUp, Settings, LogOut, Users,
   Droplets, ChevronLeft, Calculator,
-  ShoppingBag, LayoutDashboard, MoreHorizontal, X,
+  ShoppingBag, LayoutDashboard, MoreHorizontal, X, Package, Truck, 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -57,12 +57,6 @@ const NAV_ITEMS: NavItem[] = [
     sublabel: 'One-off sales',
   },
   {
-    label:    'Bottle Audit',
-    path:     '/client/accounts/bottle-audit',
-    icon:     Calculator,
-    sublabel: 'Bottle inventory',
-  },
-  {
     label:    'Customers',
     path:     '/client/accounts/customers',
     icon:     Users,
@@ -73,6 +67,18 @@ const NAV_ITEMS: NavItem[] = [
     path:     ROUTES.ACCOUNTANT.REPORTS,
     icon:     TrendingUp,
     sublabel: 'Revenue & VAT',
+  },
+  {
+    label:    'Bottle Audit',         // ← add
+    path:     '/client/accounts/bottle-audit',
+    icon:     Package,
+    sublabel: 'Returns & losses',
+  },
+  {
+    label:    'Deliveries',           // ← add
+    path:     '/client/accounts/deliveries',
+    icon:     Truck,
+    sublabel: 'Pending deliveries',
   },
   {
     label:    'Settings',
