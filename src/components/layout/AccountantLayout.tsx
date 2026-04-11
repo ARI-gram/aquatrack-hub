@@ -58,7 +58,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     label:    'Bottle Audit',
-    path:     ROUTES.ACCOUNTANT.BOTTLE_AUDIT,
+    path:     '/client/accounts/bottle-audit',
     icon:     Calculator,
     sublabel: 'Bottle inventory',
   },
