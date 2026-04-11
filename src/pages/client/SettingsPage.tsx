@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Building2, Bell, CreditCard, Shield, Upload, Save, Loader2,
+  Building2, Bell, CreditCard, Shield, Upload, Save, Loader2, Eye, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -96,11 +96,21 @@ const ClientSettingsPage: React.FC = () => {
   });
 
   // ── Password fields ─────────────────────────────────────────────────────
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: '',
-    newPassword:     '',
-    confirmPassword: '',
-  });
+    const [passwordForm, setPasswordForm] = useState({
+      currentPassword: '',
+      newPassword:     '',
+      confirmPassword: '',
+    });
+
+    // ── Password visibility ─────────────────────────────────────────────────  ← ADD HERE
+    const [showPasswords, setShowPasswords] = useState({
+      current: false,
+      new:     false,
+      confirm: false,
+    });
+
+    const toggleShow = (field: keyof typeof showPasswords) =>
+      setShowPasswords(prev => ({ ...prev, [field]: !prev[field] }));
 
   // ── Logo ref ────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -516,40 +526,81 @@ const ClientSettingsPage: React.FC = () => {
           <Card className="p-6">
             <h3 className="font-semibold mb-4">Change Password</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
               <div className="space-y-2">
                 <Label htmlFor="currentPassword">Current Password</Label>
-                <Input
-                  id="currentPassword"
-                  type="password"
-                  value={passwordForm.currentPassword}
-                  onChange={e => setPasswordForm(prev => ({
-                    ...prev, currentPassword: e.target.value,
-                  }))}
-                />
+                <div className="relative">
+                  <Input
+                    id="currentPassword"
+                    type={showPasswords.current ? 'text' : 'password'}
+                    value={passwordForm.currentPassword}
+                    onChange={e => setPasswordForm(prev => ({
+                      ...prev, currentPassword: e.target.value,
+                    }))}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShow('current')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.current
+                      ? <EyeOff className="h-4 w-4" />
+                      : <Eye    className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-              <div />
+
+              <div /> {/* spacer */}
+
               <div className="space-y-2">
                 <Label htmlFor="newPassword">New Password</Label>
-                <Input
-                  id="newPassword"
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={e => setPasswordForm(prev => ({
-                    ...prev, newPassword: e.target.value,
-                  }))}
-                />
+                <div className="relative">
+                  <Input
+                    id="newPassword"
+                    type={showPasswords.new ? 'text' : 'password'}
+                    value={passwordForm.newPassword}
+                    onChange={e => setPasswordForm(prev => ({
+                      ...prev, newPassword: e.target.value,
+                    }))}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShow('new')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.new
+                      ? <EyeOff className="h-4 w-4" />
+                      : <Eye    className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={e => setPasswordForm(prev => ({
-                    ...prev, confirmPassword: e.target.value,
-                  }))}
-                />
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={showPasswords.confirm ? 'text' : 'password'}
+                    value={passwordForm.confirmPassword}
+                    onChange={e => setPasswordForm(prev => ({
+                      ...prev, confirmPassword: e.target.value,
+                    }))}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShow('confirm')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPasswords.confirm
+                      ? <EyeOff className="h-4 w-4" />
+                      : <Eye    className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
+
             </div>
             <div className="flex justify-end mt-6">
               <Button
@@ -564,7 +615,7 @@ const ClientSettingsPage: React.FC = () => {
               >
                 {savingPassword
                   ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  : <Save className="h-4 w-4 mr-2" />}
+                  : <Save    className="h-4 w-4 mr-2" />}
                 {savingPassword ? 'Changing…' : 'Change Password'}
               </Button>
             </div>
