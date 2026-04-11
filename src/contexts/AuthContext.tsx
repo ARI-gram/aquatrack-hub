@@ -9,15 +9,27 @@ import {
   LoginCredentials, roleHierarchy,
 } from '@/types/auth.types';
 import authService from '@/api/services/auth.service';
+import { ROUTES, roleDefaultRoutes } from '@/constants/routes';
 import { CUSTOMER_ROUTES } from '@/constants/customerRoutes';
 
 // ─── Extended context type ────────────────────────────────────────────────────
 interface ExtendedAuthContextType extends AuthContextType {
   loginAsCustomer: (user: User, token: string, refreshToken: string) => void;
-  refreshUser:     () => Promise<void>;   // ← NEW
+  refreshUser:     () => Promise<void>;
 }
 
 const AuthContext = createContext<ExtendedAuthContextType | undefined>(undefined);
+
+// ─── Helper: where to send a user who must change password ───────────────────
+function mustChangePasswordRoute(role: UserRole): string {
+  switch (role) {
+    case 'accountant':   return ROUTES.ACCOUNTANT.SETTINGS;
+    case 'client_admin': return ROUTES.CLIENT_ADMIN.SETTINGS;
+    case 'driver':       return ROUTES.DRIVER.DASHBOARD;      // no settings page yet
+    case 'site_manager': return ROUTES.SITE_MANAGER.DASHBOARD;
+    default:             return '/login';
+  }
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user,      setUser]      = useState<User | null>(null);
@@ -71,10 +83,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('aquatrack_user',          JSON.stringify(loggedInUser));
 
       setUser(loggedInUser);
+
+      // ── If backend flagged a forced password change, go straight
+      //    to the settings/security page — nowhere else. ──────────────────────
+      if (loggedInUser.must_change_password) {
+        navigate(mustChangePasswordRoute(loggedInUser.role), { replace: true });
+      } else {
+        navigate(roleDefaultRoutes[loggedInUser.role], { replace: true });
+      }
+
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [navigate]);
 
   // ── Customer OTP login ────────────────────────────────────────────────────
   const loginAsCustomer = useCallback((
@@ -107,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // ── Refresh user ──────────────────────────────────────────────────────────
   // Called after a forced password change so the new must_change_password=false
-  // value flows into context and closes the modal automatically.
+  // value flows into context and the dialog closes automatically.
   const refreshUser = useCallback(async () => {
     try {
       const updated = await authService.getCurrentUser();
@@ -135,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginAsCustomer,
         logout,
         hasPermission,
-        refreshUser,    // ← NEW
+        refreshUser,
       }}
     >
       {children}
