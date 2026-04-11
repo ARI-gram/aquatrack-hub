@@ -70,16 +70,23 @@ class DriverBottleAuditView(APIView):
 
     def get(self, request):
         # ── Date range ────────────────────────────────────────────────────────
-        period = request.query_params.get('period', 'month')
+        from datetime import date as date_type
         now = timezone.now()
+        date_from_str = request.query_params.get('date_from')
+        date_to_str = request.query_params.get('date_to')
 
-        if period == 'week':
-            date_from = now - timedelta(days=7)
-        elif period == 'year':
-            date_from = now - timedelta(days=365)
-        else:
+        try:
+            date_from = timezone.make_aware(
+                timezone.datetime.strptime(date_from_str, '%Y-%m-%d')
+            ) if date_from_str else now - timedelta(days=30)
+            date_to = timezone.make_aware(
+                timezone.datetime.strptime(date_to_str, '%Y-%m-%d').replace(
+                    hour=23, minute=59, second=59
+                )
+            ) if date_to_str else now
+        except ValueError:
             date_from = now - timedelta(days=30)
-
+            date_to = now
         # ── Scope to this client ──────────────────────────────────────────────
         client = request.user.client
         driver_id = request.query_params.get('driver_id')
@@ -100,6 +107,7 @@ class DriverBottleAuditView(APIView):
             all_deliveries = Delivery.objects.filter(
                 driver=driver,
                 assigned_at__gte=date_from,
+                assigned_at__lte=date_to,
             ).select_related('order')
 
             completed = all_deliveries.filter(status='COMPLETED')
