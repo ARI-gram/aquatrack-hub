@@ -69,16 +69,10 @@ const NAV_ITEMS: NavItem[] = [
     sublabel: 'Revenue & VAT',
   },
   {
-    label:    'Bottle Audit',         // ← add
+    label:    'Bottle Audit',      
     path:     '/client/accounts/bottle-audit',
     icon:     Package,
     sublabel: 'Returns & losses',
-  },
-  {
-    label:    'Deliveries',           // ← add
-    path:     '/client/accounts/deliveries',
-    icon:     Truck,
-    sublabel: 'Pending deliveries',
   },
   {
     label:    'Settings',

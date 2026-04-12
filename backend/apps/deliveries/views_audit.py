@@ -120,7 +120,6 @@ class DriverBottleAuditView(APIView):
         results = []
 
         for driver in drivers_qs:
-            # All deliveries for this driver in the period
             all_deliveries = Delivery.objects.filter(
                 driver=driver,
                 assigned_at__gte=date_from,
@@ -134,29 +133,48 @@ class DriverBottleAuditView(APIView):
 
             bottles_delivered = 0
             bottles_to_collect = 0
-            bottles_collected = 0
             damages = 0
 
             for delivery in completed.prefetch_related('order__items'):
                 try:
                     order = delivery.order
-
-                    # Count every product unit delivered
                     for item in order.items.all():
                         bottles_delivered += item.quantity
 
-                    # Bottle exchange data (OneToOne, may not exist)
                     be = getattr(order, 'bottle_exchange', None)
                     if be:
                         bottles_to_collect += int(be.bottles_to_collect or 0)
-                        bottles_collected += int(be.bottles_collected or 0)
-
                 except Exception:
                     pass
 
-                # Deliveries flagged with issues → count as damage incidents
                 if delivery.has_issues:
                     damages += 1
+
+            # ── Pull from BottleMovement ONCE per driver, outside the delivery loop ──
+            from apps.products.models import BottleMovement
+            from django.db.models import Sum
+
+            driver_movements = BottleMovement.objects.filter(
+                driver=driver,
+                movement_type='RECEIVE_EMPTY',
+            )
+
+            road_collected = driver_movements.filter(
+                recorded_by__isnull=True,
+            ).aggregate(good=Sum('qty_good'))['good'] or 0
+
+            handed_to_office = driver_movements.filter(
+                recorded_by__isnull=False,
+            ).aggregate(
+                good=Sum('qty_good'),
+                damaged=Sum('qty_damaged'),
+            )
+            office_good = handed_to_office['good'] or 0
+            office_damaged = handed_to_office['damaged'] or 0
+
+            # Mirrors _compute_bottle_balance exactly
+            bottles_collected = max(
+                0, road_collected - office_good - office_damaged)
 
             shortfall = max(0, bottles_to_collect - bottles_collected)
 
@@ -172,7 +190,6 @@ class DriverBottleAuditView(APIView):
                 'shortfall':          shortfall,
                 'damages':            damages,
             })
-
         totals = {
             'total_deliveries':   sum(r['total_deliveries'] for r in results),
             'bottles_delivered':  sum(r['bottles_delivered'] for r in results),

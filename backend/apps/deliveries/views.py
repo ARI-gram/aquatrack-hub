@@ -837,71 +837,39 @@ class DriverCompleteDeliveryView(APIView):
         delivery.save()
 
         # ── Bottle exchange ───────────────────────────────────────────────────
-        if (
-            delivery.order.bottle_exchange
-            and (
-                data.get('bottles_delivered') is not None
-                or data.get('bottles_collected') is not None
+        if delivery.order.bottle_exchange:
+            from apps.products.models import BottleMovement as _BM
+            exchange = delivery.order.bottle_exchange
+            bottles_delivered_count = data.get('bottles_delivered') or 0
+            bottles_collected_count = data.get(
+                'bottles_collected') or 0  # default 0, never None
+
+            exchange.bottles_delivered = bottles_delivered_count
+            exchange.bottles_collected = bottles_collected_count
+            exchange.exchange_confirmed = True
+            exchange.save()
+
+            # Always write RECEIVE_EMPTY — even qty_good=0 creates an audit trail
+            # so the audit and van stock screens always have a record to read from
+            returnable_item = (
+                delivery.order.items
+                .select_related('product')
+                .filter(product__is_returnable=True)
+                .first()
             )
-        ):
-            exchange = delivery.order.bottle_exchange
-            exchange.bottles_delivered = data.get('bottles_delivered') or 0
-            exchange.bottles_collected = data.get('bottles_collected') or 0
-            exchange.exchange_confirmed = True
-            exchange.save()
-
-            bottles_collected = data.get('bottles_collected') or 0
-            if bottles_collected > 0:
-                for item in delivery.order.items.select_related('product').all():
-                    product = getattr(item, 'product', None)
-                    if product and getattr(product, 'is_returnable', False):
-                        BottleMovement.objects.create(
-                            product=product,
-                            driver=request.user,
-                            movement_type='RECEIVE_EMPTY',
-                            qty_expected=data.get('bottles_delivered') or 0,
-                            qty_good=bottles_collected,
-                            qty_damaged=0,
-                            qty_missing=max(
-                                0, (data.get('bottles_delivered') or 0) - bottles_collected),
-                            notes=f'Empties collected on delivery completion (order {delivery.order.order_number})',
-                        )
-                        break
-            exchange = delivery.order.bottle_exchange
-            exchange.bottles_delivered = data['bottles_delivered']
-            exchange.bottles_collected = data.get('bottles_collected', 0)
-            exchange.exchange_confirmed = True
-            exchange.save()
-
-            bottles_collected = data.get('bottles_collected', 0)
-            if bottles_collected and bottles_collected > 0:
-                try:
-                    from apps.products.models import BottleMovement
-                    for item in delivery.order.items.select_related('product').all():
-                        product = getattr(item, 'product', None)
-                        if product and getattr(product, 'is_returnable', False):
-                            bottles_delivered_count = data.get(
-                                'bottles_delivered', 0)
-                            BottleMovement.objects.create(
-                                product=product,
-                                driver=request.user,
-                                movement_type='RECEIVE_EMPTY',
-                                qty_expected=bottles_delivered_count,
-                                qty_good=bottles_collected,
-                                qty_damaged=0,
-                                qty_missing=max(
-                                    0, bottles_delivered_count - bottles_collected),
-                                notes=(
-                                    f'Empties collected on delivery completion '
-                                    f'(order {delivery.order.order_number})'
-                                ),
-                            )
-                            break
-                except Exception:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        'RECEIVE_EMPTY movement failed for delivery %s', delivery_id)
-
+            if returnable_item:
+                _BM.objects.create(
+                    product=returnable_item.product,
+                    driver=request.user,
+                    movement_type='RECEIVE_EMPTY',
+                    qty_expected=bottles_delivered_count,
+                    qty_good=bottles_collected_count,
+                    qty_damaged=0,
+                    qty_missing=max(0, bottles_delivered_count -
+                                    bottles_collected_count),
+                    notes=f'Empties collected on delivery completion (order {delivery.order.order_number})',
+                    # recorded_by=None → driver-side, counts toward van empty stock
+                )
         # ── Partial delivery adjustment ───────────────────────────────────────
         #
         # Strategy:
