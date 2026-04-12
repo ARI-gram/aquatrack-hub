@@ -8,50 +8,47 @@
  *    → "Admin" replaces "Store" — shows recorded_by_name as the seller
  *
  * Changes:
- *  ✅ "New Sale" button added top-right next to Refresh
- *  ✅ DirectSaleDialog ported in with product-type picker step
- *     (user picks Bottles or Consumables, then proceeds to existing sale flow)
- *  ✅ Bottles, consumables, and drivers loaded on mount for the dialog
- *  ✅ After a successful sale the list auto-reloads
+ *  ✅ Added "New Direct Sale" button — opens DirectSaleDialog (bottle + consumable)
+ *  ✅ DirectSaleDialog imported from StorePage logic (self-contained copy)
+ *  ✅ After a sale is recorded the list auto-refreshes
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ManagerLayout }   from '@/components/layout/ManagerLayout';
-import { Input }    from '@/components/ui/input';
-import { Badge }    from '@/components/ui/badge';
-import { Button }   from '@/components/ui/button';
+import { Input }  from '@/components/ui/input';
+import { Badge }  from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
 import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog, DialogContent, DialogTitle, DialogDescription,
-} from '@/components/ui/dialog';
-import {
   ShoppingBag, Droplets, Package, Loader2,
   Search, RefreshCw, InboxIcon, User,
   Phone, X, TrendingUp, Users, Calendar,
-  UserCog, Truck, Plus, Check, Minus,
-  ChevronRight, AlertTriangle, CheckCircle2,
-  RotateCcw, UserCheck, ImageOff,
+  UserCog, Truck, Plus, Check, UserCheck,
+  ChevronRight, ImageOff, Minus, RotateCcw,
+  AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 import { driverStoreService }                          from '@/api/services/driver-store.service';
 import { bottleStoreService, consumableStoreService }  from '@/api/services/store.service';
-import axiosInstance                                   from '@/api/axios.config';
-import { useToast }                                    from '@/hooks/use-toast';
-import { useAuth }                                     from '@/contexts/AuthContext';
-import { toast as sonnerToast }                        from 'sonner';
-import { cn }                                          from '@/lib/utils';
-import { format }                                      from 'date-fns';
-import { customerAdminService, type AdminCustomer }    from '@/api/services/customerAdmin.service';
-import { DriverSaleReceiptModal }                      from '@/pages/driver/DriverSaleReceiptModal';
-import type { DriverSaleData }                         from '@/pages/driver/DriverSaleReceiptModal';
 import type {
   BottleProductStore,
   ConsumableProductStore,
 } from '@/api/services/store.service';
+import { customerAdminService, type AdminCustomer }    from '@/api/services/customerAdmin.service';
+import { DriverSaleReceiptModal }                      from '@/pages/driver/DriverSaleReceiptModal';
+import type { DriverSaleData }                         from '@/pages/driver/DriverSaleReceiptModal';
+import axiosInstance                                   from '@/api/axios.config';
+import { useAuth }                                     from '@/contexts/AuthContext';
+import { toast }                                       from 'sonner';
+import { cn }                                          from '@/lib/utils';
+import { format }                                      from 'date-fns';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -94,32 +91,38 @@ interface DeliveriesPageProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Unit helpers (needed by the sale dialog)
+// Sale dialog types
 // ─────────────────────────────────────────────────────────────────────────────
 
-const UNIT_LABEL_MAP: Record<string, string> = {
-  BOTTLES:   'Bottles',   LITRES:    'Litres',   DOZENS:    'Dozens',
-  PIECES:    'Pieces',    CRATES:    'Crates',   JERRICANS: 'Jerricans',
-  SACHETS:   'Sachets',   GALLONS:   'Gallons',  PACKS:     'Packs',
-  CARTONS:   'Cartons',
-};
-const UNIT_COLOR_MAP: Record<string, string> = {
-  BOTTLES:   'text-violet-500 bg-violet-500/10',
-  LITRES:    'text-sky-500 bg-sky-500/10',
-  DOZENS:    'text-amber-500 bg-amber-500/10',
-  PIECES:    'text-emerald-500 bg-emerald-500/10',
-  CRATES:    'text-orange-500 bg-orange-500/10',
-  JERRICANS: 'text-cyan-500 bg-cyan-500/10',
-  SACHETS:   'text-pink-500 bg-pink-500/10',
-  GALLONS:   'text-blue-500 bg-blue-500/10',
-  PACKS:     'text-indigo-500 bg-indigo-500/10',
-  CARTONS:   'text-rose-500 bg-rose-500/10',
-};
-function getUnitLabel(unit?: string) { return UNIT_LABEL_MAP[unit ?? ''] ?? (unit ?? ''); }
-function getUnitColor(unit?: string) { return UNIT_COLOR_MAP[unit ?? ''] ?? 'text-muted-foreground bg-muted'; }
+interface CustomerResult {
+  id:    string;
+  name:  string;
+  phone: string;
+  email: string;
+}
+
+interface SaleProductOption {
+  id:            string;
+  name:          string;
+  maxQty:        number;
+  selling_price?: string;
+  unit?:         string;
+  imageUrl?:     string | null;
+}
+
+type SaleStep     = 'customer' | 'sale';
+type SaleMode     = 'bottle' | 'consumable' | null; // null = dialog closed
+
+const DIRECT_SALE_PAYMENT_METHODS = [
+  { value: 'CASH',          label: 'Cash',               icon: '💵', desc: 'Collect cash on the spot'    },
+  { value: 'MPESA',         label: 'M-Pesa',             icon: '📱', desc: 'Mobile money transfer'        },
+  { value: 'BANK_TRANSFER', label: 'Bank Transfer',      icon: '🏦', desc: 'Direct bank payment'          },
+  { value: 'CREDIT',        label: 'Pay Later (Credit)', icon: '🧾', desc: 'Added to customer invoice'    },
+] as const;
+type DirectSalePM = typeof DIRECT_SALE_PAYMENT_METHODS[number]['value'];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// List-page helpers
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parseLocal(iso: string): Date {
@@ -138,10 +141,15 @@ function dateLabel(iso: string): string {
   const d   = parseLocal(iso);
   if (d.getTime() === 0) return 'Unknown date';
   const now = new Date();
+
   const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth()    === b.getMonth()    &&
+    a.getDate()     === b.getDate();
+
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
+
   if (sameDay(d, now))       return 'Today';
   if (sameDay(d, yesterday)) return 'Yesterday';
   return format(d, 'EEE, d MMM yyyy');
@@ -166,7 +174,11 @@ function groupByDate(items: DirectSale[]): Record<string, DirectSale[]> {
 function parseCustomer(notes: string): { name: string; phone: string; isAccount: boolean } {
   if (!notes) return { name: 'Walk-in', phone: '', isAccount: false };
   const custMatch = notes.match(/^Customer:\s*([^(·\n]+?)(?:\s*\(([^)]+)\))?(?:\s*·|$)/i);
-  if (custMatch) return { name: custMatch[1].trim(), phone: custMatch[2]?.trim() ?? '', isAccount: true };
+  if (custMatch) return {
+    name:      custMatch[1].trim(),
+    phone:     custMatch[2]?.trim() ?? '',
+    isAccount: true,
+  };
   const walkMatch = notes.match(/^Walk-in:\s*([^·\n]+)/i);
   if (walkMatch) return { name: walkMatch[1].trim(), phone: '', isAccount: false };
   return { name: 'Walk-in', phone: '', isAccount: false };
@@ -213,13 +225,28 @@ function passesDateFilter(iso: string, dateFrom: string, dateTo: string): boolea
   return true;
 }
 
-function soldBy(sale: DirectSale): string {
-  if (sale.source === 'driver') return sale.driver_name ?? 'Driver';
-  return sale.recorded_by_name ?? 'Admin';
+function getUnitLabel(unit?: string): string {
+  const map: Record<string, string> = {
+    BOTTLES: 'Bottles', LITRES: 'Litres', DOZENS: 'Dozens',
+    PIECES: 'Pieces', CRATES: 'Crates', JERRICANS: 'Jerricans',
+    SACHETS: 'Sachets', GALLONS: 'Gallons', PACKS: 'Packs', CARTONS: 'Cartons',
+  };
+  return map[unit ?? ''] ?? (unit ?? '');
+}
+
+function getUnitColor(unit?: string): string {
+  const map: Record<string, string> = {
+    BOTTLES: 'text-violet-500 bg-violet-500/10', LITRES: 'text-sky-500 bg-sky-500/10',
+    DOZENS: 'text-amber-500 bg-amber-500/10', PIECES: 'text-emerald-500 bg-emerald-500/10',
+    CRATES: 'text-orange-500 bg-orange-500/10', JERRICANS: 'text-cyan-500 bg-cyan-500/10',
+    SACHETS: 'text-pink-500 bg-pink-500/10', GALLONS: 'text-blue-500 bg-blue-500/10',
+    PACKS: 'text-indigo-500 bg-indigo-500/10', CARTONS: 'text-rose-500 bg-rose-500/10',
+  };
+  return map[unit ?? ''] ?? 'text-muted-foreground bg-muted';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SourceBadge
+// Source badge
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SourceBadge: React.FC<{ source: DirectSale['source'] }> = ({ source }) =>
@@ -233,6 +260,11 @@ const SourceBadge: React.FC<{ source: DirectSale['source'] }> = ({ source }) =>
     </span>
   );
 
+function soldBy(sale: DirectSale): string {
+  if (sale.source === 'driver') return sale.driver_name ?? 'Driver';
+  return sale.recorded_by_name ?? 'Admin';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Desktop table row
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,8 +272,12 @@ const SourceBadge: React.FC<{ source: DirectSale['source'] }> = ({ source }) =>
 const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven }) => {
   const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
   const seller = soldBy(sale);
+
   return (
-    <tr className={cn('border-b last:border-0 transition-colors hover:bg-muted/30', isEven ? 'bg-background' : 'bg-muted/10')}>
+    <tr className={cn(
+      'border-b last:border-0 transition-colors hover:bg-muted/30',
+      isEven ? 'bg-background' : 'bg-muted/10',
+    )}>
       <td className="px-4 py-3.5">
         <p className="text-sm font-semibold">
           {sale.movement_date ? format(parseLocal(sale.movement_date), 'dd MMM yyyy') : '—'}
@@ -250,9 +286,13 @@ const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven
           {sale.movement_date ? format(parseLocal(sale.movement_date), 'HH:mm') : '—'}
         </p>
       </td>
+
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2">
-          <div className={cn('h-7 w-7 rounded-full flex items-center justify-center shrink-0 font-bold text-xs', sale.source === 'driver' ? 'bg-violet-500/10 text-violet-600' : 'bg-teal-500/10 text-teal-600')}>
+          <div className={cn(
+            'h-7 w-7 rounded-full flex items-center justify-center shrink-0 font-bold text-xs',
+            sale.source === 'driver' ? 'bg-violet-500/10 text-violet-600' : 'bg-teal-500/10 text-teal-600',
+          )}>
             {seller.trim()[0]?.toUpperCase() ?? '?'}
           </div>
           <div className="min-w-0">
@@ -261,24 +301,39 @@ const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven
           </div>
         </div>
       </td>
+
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2">
-          <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center shrink-0', sale.product_type === 'bottle' ? 'bg-blue-500/10 text-blue-600' : 'bg-sky-500/10 text-sky-600')}>
-            {sale.product_type === 'bottle' ? <Droplets className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />}
+          <div className={cn(
+            'h-7 w-7 rounded-lg flex items-center justify-center shrink-0',
+            sale.product_type === 'bottle' ? 'bg-blue-500/10 text-blue-600' : 'bg-sky-500/10 text-sky-600',
+          )}>
+            {sale.product_type === 'bottle'
+              ? <Droplets className="h-3.5 w-3.5" />
+              : <Package  className="h-3.5 w-3.5" />
+            }
           </div>
           <span className="text-sm">{sale.product_name}</span>
         </div>
       </td>
+
       <td className="px-4 py-3.5">
         <span className="font-bold text-amber-600 tabular-nums text-base">×{sale.quantity}</span>
       </td>
+
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2">
-          <div className={cn('h-6 w-6 rounded-full flex items-center justify-center shrink-0', isAccount ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+          <div className={cn(
+            'h-6 w-6 rounded-full flex items-center justify-center shrink-0',
+            isAccount ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground',
+          )}>
             <User className="h-3 w-3" />
           </div>
           <div className="min-w-0">
-            <p className={cn('text-sm font-medium truncate', isAccount ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground')}>
+            <p className={cn(
+              'text-sm font-medium truncate',
+              isAccount ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground',
+            )}>
               {sale.customer_name || custName}
             </p>
             {phone && (
@@ -305,13 +360,17 @@ const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven
 const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
   const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
   const seller = soldBy(sale);
+
   return (
     <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
       <div className={cn('h-[3px] w-full', sale.source === 'driver' ? 'bg-violet-400' : 'bg-teal-400')} />
       <div className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center shrink-0', sale.product_type === 'bottle' ? 'bg-blue-500/10 text-blue-600' : 'bg-sky-500/10 text-sky-600')}>
+            <div className={cn(
+              'h-10 w-10 rounded-xl flex items-center justify-center shrink-0',
+              sale.product_type === 'bottle' ? 'bg-blue-500/10 text-blue-600' : 'bg-sky-500/10 text-sky-600',
+            )}>
               {sale.product_type === 'bottle' ? <Droplets className="h-5 w-5" /> : <Package className="h-5 w-5" />}
             </div>
             <div className="min-w-0">
@@ -323,14 +382,34 @@ const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
           </div>
           <span className="text-2xl font-black tabular-nums text-amber-600 shrink-0">×{sale.quantity}</span>
         </div>
-        <div className={cn('flex items-center gap-2 px-3 py-2 rounded-xl border', sale.source === 'driver' ? 'bg-violet-50 dark:bg-violet-950/30 border-violet-100 dark:border-violet-900' : 'bg-teal-50 dark:bg-teal-950/30 border-teal-100 dark:border-teal-900')}>
-          <div className={cn('h-6 w-6 rounded-full flex items-center justify-center shrink-0 font-bold text-[10px]', sale.source === 'driver' ? 'bg-violet-500/20 text-violet-600' : 'bg-teal-500/20 text-teal-600')}>
+
+        <div className={cn(
+          'flex items-center gap-2 px-3 py-2 rounded-xl border',
+          sale.source === 'driver'
+            ? 'bg-violet-50 dark:bg-violet-950/30 border-violet-100 dark:border-violet-900'
+            : 'bg-teal-50 dark:bg-teal-950/30 border-teal-100 dark:border-teal-900',
+        )}>
+          <div className={cn(
+            'h-6 w-6 rounded-full flex items-center justify-center shrink-0 font-bold text-[10px]',
+            sale.source === 'driver' ? 'bg-violet-500/20 text-violet-600' : 'bg-teal-500/20 text-teal-600',
+          )}>
             {seller.trim()[0]?.toUpperCase() ?? '?'}
           </div>
-          <p className={cn('text-xs font-semibold truncate flex-1', sale.source === 'driver' ? 'text-violet-800 dark:text-violet-300' : 'text-teal-800 dark:text-teal-300')}>{seller}</p>
+          <p className={cn(
+            'text-xs font-semibold truncate flex-1',
+            sale.source === 'driver' ? 'text-violet-800 dark:text-violet-300' : 'text-teal-800 dark:text-teal-300',
+          )}>
+            {seller}
+          </p>
           <SourceBadge source={sale.source} />
         </div>
-        <div className={cn('flex items-center gap-2.5 px-3 py-2.5 rounded-xl border', isAccount ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-muted/40 border-border/40')}>
+
+        <div className={cn(
+          'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border',
+          isAccount
+            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800'
+            : 'bg-muted/40 border-border/40',
+        )}>
           <User className={cn('h-3.5 w-3.5 shrink-0', isAccount ? 'text-emerald-600' : 'text-muted-foreground')} />
           <div className="flex-1 min-w-0">
             <p className={cn('text-xs font-semibold truncate', isAccount ? 'text-emerald-800 dark:text-emerald-300' : 'text-muted-foreground')}>
@@ -354,36 +433,12 @@ const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DirectSaleDialog — ported from StorePage with a product-type picker step
+// Small reusable form field
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface SaleProductOption {
-  id:            string;
-  name:          string;
-  maxQty:        number;
-  selling_price?: string;
-  unit?:         string;
-  imageUrl?:     string | null;
-}
-
-interface CustomerResult {
-  id:    string;
-  name:  string;
-  phone: string;
-  email: string;
-}
-
-const DIRECT_SALE_PAYMENT_METHODS = [
-  { value: 'CASH',          label: 'Cash',               icon: '💵', desc: 'Collect cash on the spot'    },
-  { value: 'MPESA',         label: 'M-Pesa',             icon: '📱', desc: 'Mobile money transfer'        },
-  { value: 'BANK_TRANSFER', label: 'Bank Transfer',      icon: '🏦', desc: 'Direct bank payment'          },
-  { value: 'CREDIT',        label: 'Pay Later (Credit)', icon: '🧾', desc: 'Added to customer invoice'    },
-] as const;
-type DirectSalePM = typeof DIRECT_SALE_PAYMENT_METHODS[number]['value'];
-
-// ── Small helpers ──────────────────────────────────────────────────────────
-
-const Field: React.FC<{ label: string; required?: boolean; children: React.ReactNode; hint?: string }> = ({ label, required, children, hint }) => (
+const Field: React.FC<{ label: string; required?: boolean; children: React.ReactNode; hint?: string }> = ({
+  label, required, children, hint,
+}) => (
   <div className="space-y-1.5">
     <label className="text-sm font-medium">
       {label}{required && <span className="text-destructive ml-0.5">*</span>}
@@ -392,6 +447,10 @@ const Field: React.FC<{ label: string; required?: boolean; children: React.React
     {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
   </div>
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Qty steppers
+// ─────────────────────────────────────────────────────────────────────────────
 
 const QtyStepper: React.FC<{ value: number; max: number; onChange: (n: number) => void }> = ({ value, max, onChange }) => (
   <div className="flex items-center justify-center gap-6">
@@ -427,7 +486,15 @@ const QtyStepperWithZero: React.FC<{ value: number; max: number; onChange: (n: n
   </div>
 );
 
-const SaleProductCard: React.FC<{ product: SaleProductOption; selected: boolean; onSelect: () => void }> = ({ product, selected, onSelect }) => (
+// ─────────────────────────────────────────────────────────────────────────────
+// Product card for sale dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SaleProductCard: React.FC<{
+  product:  SaleProductOption;
+  selected: boolean;
+  onSelect: () => void;
+}> = ({ product, selected, onSelect }) => (
   <button onClick={onSelect} disabled={product.maxQty <= 0}
     className={cn(
       'w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left',
@@ -439,7 +506,7 @@ const SaleProductCard: React.FC<{ product: SaleProductOption; selected: boolean;
     )}>
     <div className="h-10 w-10 rounded-xl bg-muted/60 flex items-center justify-center shrink-0 overflow-hidden border border-border/30">
       {product.imageUrl
-        ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+        ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
         : <ImageOff className="h-4 w-4 text-muted-foreground/40" />
       }
     </div>
@@ -451,7 +518,9 @@ const SaleProductCard: React.FC<{ product: SaleProductOption; selected: boolean;
             {getUnitLabel(product.unit)}
           </span>
         )}
-        <p className={cn('text-xs font-medium', product.maxQty <= 0 ? 'text-destructive' : product.maxQty <= 5 ? 'text-amber-600' : 'text-muted-foreground')}>
+        <p className={cn('text-xs font-medium',
+          product.maxQty <= 0 ? 'text-destructive' : product.maxQty <= 5 ? 'text-amber-600' : 'text-muted-foreground',
+        )}>
           {product.maxQty <= 0 ? 'Out of stock' : `${product.maxQty} available`}
         </p>
         {product.selling_price && parseFloat(product.selling_price) > 0 && (
@@ -465,9 +534,14 @@ const SaleProductCard: React.FC<{ product: SaleProductOption; selected: boolean;
   </button>
 );
 
-// ── Customer picker step ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer picker step
+// ─────────────────────────────────────────────────────────────────────────────
 
-const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWalkIn: () => void }> = ({ onSelect, onWalkIn }) => {
+const CustomerPickerStep: React.FC<{
+  onSelect: (c: CustomerResult) => void;
+  onWalkIn: () => void;
+}> = ({ onSelect, onWalkIn }) => {
   const [customers,       setCustomers]       = useState<CustomerResult[]>([]);
   const [filtered,        setFiltered]        = useState<CustomerResult[]>([]);
   const [loading,         setLoading]         = useState(true);
@@ -480,7 +554,9 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
     setFetchAttempted(true);
     customerAdminService.getCustomers({ limit: 100 })
       .then(result => {
-        const raw: CustomerResult[] = (result.data ?? []).map(c => ({ id: c.id, name: c.full_name, phone: c.phone_number, email: c.email ?? '' }));
+        const raw: CustomerResult[] = (result.data ?? []).map(c => ({
+          id: c.id, name: c.full_name, phone: c.phone_number, email: c.email ?? '',
+        }));
         setCustomers(raw);
         setFiltered(raw);
         if (raw.length === 0) setError('No customers found.');
@@ -492,7 +568,11 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
   useEffect(() => {
     if (!query.trim()) { setFiltered(customers); return; }
     const q = query.toLowerCase();
-    setFiltered(customers.filter(c => c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.email?.toLowerCase().includes(q)));
+    setFiltered(customers.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      (c.phone && c.phone.includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)),
+    ));
   }, [query, customers]);
 
   return (
@@ -502,21 +582,32 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
           <User className="h-7 w-7 text-amber-600" />
         </div>
         <p className="font-bold text-base">Who is this sale for?</p>
-        <p className="text-sm text-muted-foreground text-center max-w-[260px]">Select an existing customer or record as a walk-in.</p>
+        <p className="text-sm text-muted-foreground text-center max-w-[260px]">
+          Select an existing customer or record as a walk-in.
+        </p>
       </div>
 
       {(customers.length > 0 || (!loading && error)) && (
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <input type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by name or phone…" disabled={customers.length === 0}
-            className="w-full h-11 pl-10 pr-10 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:border-amber-400/50 disabled:opacity-50" />
-          {query && <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>}
+          <input
+            type="text" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Filter by name or phone…" disabled={customers.length === 0}
+            className="w-full h-11 pl-10 pr-10 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:border-amber-400/50 disabled:opacity-50"
+          />
+          {query && (
+            <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
 
       <button onClick={onWalkIn}
         className="w-full flex items-center gap-3 p-3.5 rounded-xl border-2 border-dashed border-border/60 hover:border-amber-400/40 hover:bg-amber-500/5 active:scale-[0.98] transition-all text-left">
-        <div className="h-10 w-10 rounded-xl bg-muted/60 flex items-center justify-center shrink-0"><User className="h-5 w-5 text-muted-foreground" /></div>
+        <div className="h-10 w-10 rounded-xl bg-muted/60 flex items-center justify-center shrink-0">
+          <User className="h-5 w-5 text-muted-foreground" />
+        </div>
         <div className="flex-1">
           <p className="font-semibold text-sm">Walk-in / Roadside Customer</p>
           <p className="text-xs text-muted-foreground mt-0.5">Record without linking to an account.</p>
@@ -537,6 +628,7 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
             <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Existing customers</span>
             <div className="flex-1 h-px bg-border/50" />
           </div>
+
           {loading ? (
             <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading customers…</span>
@@ -544,12 +636,18 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
               <Search className="h-8 w-8 text-muted-foreground/30" />
-              <p className="text-sm font-semibold text-muted-foreground">{query ? 'No customers match your filter' : 'No customers found'}</p>
-              {query && <button onClick={() => setQuery('')} className="text-xs text-primary underline underline-offset-2">Clear filter</button>}
+              <p className="text-sm font-semibold text-muted-foreground">
+                {query ? 'No customers match your filter' : 'No customers found'}
+              </p>
+              {query && (
+                <button onClick={() => setQuery('')} className="text-xs text-primary underline underline-offset-2">Clear filter</button>
+              )}
             </div>
           ) : (
             <div className="space-y-2 max-h-72 overflow-y-auto pr-0.5 pb-2">
-              <p className="text-xs text-muted-foreground px-1">{filtered.length} customer{filtered.length !== 1 ? 's' : ''}{query ? ` matching "${query}"` : ''}</p>
+              <p className="text-xs text-muted-foreground px-1">
+                {filtered.length} customer{filtered.length !== 1 ? 's' : ''}{query ? ` matching "${query}"` : ''}
+              </p>
               {filtered.map(c => (
                 <button key={c.id} onClick={() => onSelect(c)}
                   className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-border/60 bg-card hover:border-amber-400/40 hover:bg-amber-500/5 active:scale-[0.98] transition-all text-left">
@@ -558,7 +656,11 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm truncate">{c.name}</p>
-                    {c.phone && <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3 shrink-0" />{c.phone}</p>}
+                    {c.phone && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <Phone className="h-3 w-3 shrink-0" />{c.phone}
+                      </p>
+                    )}
                   </div>
                   <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                 </button>
@@ -571,26 +673,22 @@ const CustomerPickerStep: React.FC<{ onSelect: (c: CustomerResult) => void; onWa
   );
 };
 
-// ── Main dialog ────────────────────────────────────────────────────────────
-
-type SaleStep = 'type' | 'customer' | 'sale';
+// ─────────────────────────────────────────────────────────────────────────────
+// Direct Sale Dialog (self-contained — same logic as StorePage)
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface DirectSaleDialogProps {
-  open:             boolean;
-  bottleProducts:   SaleProductOption[];
-  consumableProducts: SaleProductOption[];
-  onClose:          () => void;
-  onSaved:          () => void;
+  open:       boolean;
+  mode:       'bottle' | 'consumable';
+  products:   SaleProductOption[];
+  onClose:    () => void;
+  onSaved:    () => void;   // triggers list refresh
 }
 
-const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
-  open, bottleProducts, consumableProducts, onClose, onSaved,
-}) => {
-  const { toast }  = useToast();
-  const { user }   = useAuth();
+const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({ open, mode, products, onClose, onSaved }) => {
+  const { user } = useAuth();
 
-  const [step,             setStep]             = useState<SaleStep>('type');
-  const [mode,             setMode]             = useState<'bottle' | 'consumable' | null>(null);
+  const [step,             setStep]             = useState<SaleStep>('customer');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [isWalkIn,         setIsWalkIn]         = useState(false);
   const [customerName,     setCustomerName]     = useState('');
@@ -605,21 +703,13 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
   const [profileLoading,   setProfileLoading]   = useState(false);
   const [paymentMethod,    setPaymentMethod]    = useState<DirectSalePM | ''>('');
 
-  const products = mode === 'bottle' ? bottleProducts : consumableProducts;
-
   useEffect(() => {
     if (open) {
-      setStep('type'); setMode(null); setSelectedCustomer(null); setIsWalkIn(false);
-      setCustomerName(''); setProductId(''); setQty(1); setQtyCollected(0); setNotes('');
-      setCustomerProfile(null); setProfileLoading(false); setPaymentMethod('');
+      setStep('customer'); setSelectedCustomer(null); setIsWalkIn(false);
+      setCustomerName(''); setProductId(''); setQty(1); setQtyCollected(0);
+      setNotes(''); setCustomerProfile(null); setProfileLoading(false); setPaymentMethod('');
     }
   }, [open]);
-
-  const handleSelectType = (t: 'bottle' | 'consumable') => {
-    setMode(t);
-    setProductId(''); setQty(1); setQtyCollected(0);
-    setStep('customer');
-  };
 
   const handleSelectCustomer = async (c: CustomerResult) => {
     setSelectedCustomer(c); setCustomerName(c.name); setIsWalkIn(false); setStep('sale');
@@ -635,25 +725,26 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
   };
 
   const handleWalkIn = () => {
-    setSelectedCustomer(null); setCustomerProfile(null);
-    setIsWalkIn(true); setCustomerName(''); setPaymentMethod('CASH'); setStep('sale');
+    setSelectedCustomer(null); setCustomerProfile(null); setIsWalkIn(true);
+    setCustomerName(''); setPaymentMethod('CASH'); setStep('sale');
   };
 
   const handleBack = () => {
-    if (step === 'sale') { setStep('customer'); setSelectedCustomer(null); setCustomerProfile(null); setIsWalkIn(false); setCustomerName(''); setPaymentMethod(''); setProductId(''); setQty(1); setQtyCollected(0); }
-    else if (step === 'customer') { setStep('type'); setMode(null); }
+    setStep('customer'); setSelectedCustomer(null); setCustomerProfile(null);
+    setIsWalkIn(false); setCustomerName(''); setPaymentMethod('');
+    setProductId(''); setQty(1); setQtyCollected(0);
   };
 
-  const selected  = products.find(p => p.id === productId);
-  const isBottle  = mode === 'bottle';
-  const unitPrice = selected?.selling_price ? parseFloat(selected.selling_price) : 0;
+  const selected    = products.find(p => p.id === productId);
+  const isReturnable = mode === 'bottle';
+  const unitPrice   = selected?.selling_price ? parseFloat(selected.selling_price) : 0;
 
   const canSubmit =
     !!productId && qty >= 1 && !!paymentMethod &&
     !(isWalkIn && !customerName.trim());
 
   const handleSubmit = async () => {
-    if (!canSubmit || !mode) return;
+    if (!canSubmit) return;
     setLoading(true);
     try {
       const finalNotes = [
@@ -666,61 +757,51 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
 
       if (mode === 'bottle') {
         await bottleStoreService.directSale({
-          product:       productId,
-          quantity:      qty,
-          customer_id:   selectedCustomer?.id,
+          product: productId, quantity: qty,
+          customer_id: selectedCustomer?.id,
           customer_name: selectedCustomer?.name ?? customerName.trim(),
-          qty_collected: qtyCollected,
-          notes:         finalNotes,
+          qty_collected: qtyCollected, notes: finalNotes,
         });
       } else {
         await consumableStoreService.directSale({
-          product:       productId,
-          quantity:      qty,
-          customer_id:   selectedCustomer?.id,
+          product: productId, quantity: qty,
+          customer_id: selectedCustomer?.id,
           customer_name: selectedCustomer?.name ?? customerName.trim(),
-          notes:         finalNotes,
+          notes: finalNotes,
         });
       }
 
-      toast({ title: `Sale recorded — ${qty} × ${selected?.name}` } as Parameters<typeof toast>[0]);
+      toast.success(`Sale recorded — ${qty} × ${selected?.name}`);
 
       const servedBy = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Store Admin';
       setReceiptData({
         productName:   selected?.name ?? 'Product',
         productUnit:   selected?.unit ?? (mode === 'bottle' ? 'BOTTLES' : 'UNITS'),
-        isReturnable:  isBottle,
-        quantity:      qty,
-        unitPrice,
+        isReturnable, quantity: qty, unitPrice,
         customerName:  (selectedCustomer?.name ?? customerName.trim()) || 'Walk-in Customer',
         customerPhone: selectedCustomer?.phone ?? undefined,
         isWalkIn:      !selectedCustomer,
-        paymentMethod: 'CASH',
-        servedBy,
-        date:          new Date().toISOString(),
+        paymentMethod: 'CASH', servedBy, date: new Date().toISOString(),
       });
       setShowReceipt(true);
       onClose();
       onSaved();
     } catch (err: unknown) {
-      toast({
-        title:       'Error',
-        description: (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to record sale.',
-        variant:     'destructive',
-      } as Parameters<typeof toast>[0]);
+      toast.error(
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+          ?? 'Failed to record sale.',
+      );
     } finally { setLoading(false); }
   };
 
-  const dialogTitle =
-    step === 'type'     ? 'New Direct Sale' :
-    step === 'customer' ? 'Select Customer' :
-    selectedCustomer    ? `Sale for ${selectedCustomer.name}` : 'Walk-in Sale';
+  const dialogTitle = step === 'customer'
+    ? 'New Direct Sale'
+    : selectedCustomer ? `Sale for ${selectedCustomer.name}` : 'Walk-in Sale';
 
   return (
     <>
       <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
         <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
-
           {/* Header */}
           <div className="bg-gradient-to-br from-amber-500/10 to-transparent -mx-6 -mt-6 px-6 pt-6 pb-5 mb-2 border-b border-border/60">
             <div className="flex items-center gap-3">
@@ -730,77 +811,51 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
               <div className="flex-1 min-w-0">
                 <DialogTitle className="text-base font-semibold truncate">{dialogTitle}</DialogTitle>
                 <DialogDescription className="text-xs mt-0">
-                  {step === 'type'     ? 'Choose what you are selling' :
-                   step === 'customer' ? 'Choose a customer to continue' :
-                                        'Configure and record the sale'}
+                  {step === 'customer' ? 'Choose a customer to continue' : 'Configure and record the sale'}
                 </DialogDescription>
               </div>
-              {step !== 'type' && (
-                <button onClick={handleBack} className="text-xs font-semibold text-amber-600 px-2 py-1 rounded-lg hover:bg-amber-500/10 transition-colors shrink-0">
+              {step === 'sale' && (
+                <button onClick={handleBack}
+                  className="text-xs font-semibold text-amber-600 px-2 py-1 rounded-lg hover:bg-amber-500/10 transition-colors shrink-0">
                   ← Back
                 </button>
               )}
             </div>
           </div>
 
-          {/* ── Step 0: type picker ── */}
-          {step === 'type' && (
-            <div className="space-y-3 py-2">
-              <p className="text-sm text-muted-foreground text-center">What type of product are you selling?</p>
-              <button onClick={() => handleSelectType('bottle')}
-                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-border/60 bg-card hover:border-blue-400/50 hover:bg-blue-500/5 active:scale-[0.98] transition-all text-left">
-                <div className="h-12 w-12 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                  <Droplets className="h-6 w-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm">Returnable Bottles</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {bottleProducts.length} product{bottleProducts.length !== 1 ? 's' : ''} ·{' '}
-                    {bottleProducts.filter(p => p.maxQty > 0).length} in stock
-                  </p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-              </button>
-
-              <button onClick={() => handleSelectType('consumable')}
-                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-border/60 bg-card hover:border-sky-400/50 hover:bg-sky-500/5 active:scale-[0.98] transition-all text-left">
-                <div className="h-12 w-12 rounded-xl bg-sky-500/10 text-sky-600 flex items-center justify-center shrink-0">
-                  <Package className="h-6 w-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm">Consumables</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {consumableProducts.length} product{consumableProducts.length !== 1 ? 's' : ''} ·{' '}
-                    {consumableProducts.filter(p => p.maxQty > 0).length} in stock
-                  </p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-              </button>
-            </div>
-          )}
-
-          {/* ── Step 1: customer picker ── */}
+          {/* Step 1 — customer */}
           {step === 'customer' && (
             <CustomerPickerStep onSelect={handleSelectCustomer} onWalkIn={handleWalkIn} />
           )}
 
-          {/* ── Step 2: sale form ── */}
+          {/* Step 2 — sale form */}
           {step === 'sale' && (
             <div className="space-y-5 pb-2">
-
               {/* Customer chip */}
-              <div className={cn('flex items-center gap-3 p-3.5 rounded-xl border-2', selectedCustomer ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800' : 'border-border/60 bg-muted/30')}>
+              <div className={cn(
+                'flex items-center gap-3 p-3.5 rounded-xl border-2',
+                selectedCustomer
+                  ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800'
+                  : 'border-border/60 bg-muted/30',
+              )}>
                 {selectedCustomer ? (
                   <>
                     <UserCheck className="h-5 w-5 text-emerald-600 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-sm text-emerald-800 dark:text-emerald-300 truncate">{selectedCustomer.name}</p>
-                      {selectedCustomer.phone && <p className="text-xs text-emerald-700/80 dark:text-emerald-400 flex items-center gap-1 mt-0.5"><Phone className="h-3 w-3" />{selectedCustomer.phone}</p>}
+                      {selectedCustomer.phone && (
+                        <p className="text-xs text-emerald-700/80 dark:text-emerald-400 flex items-center gap-1 mt-0.5">
+                          <Phone className="h-3 w-3" />{selectedCustomer.phone}
+                        </p>
+                      )}
                     </div>
                     <span className="text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-full px-2 py-0.5 shrink-0">Account</span>
                   </>
                 ) : (
-                  <><User className="h-5 w-5 text-muted-foreground shrink-0" /><p className="font-semibold text-sm text-muted-foreground">Walk-in Customer</p></>
+                  <>
+                    <User className="h-5 w-5 text-muted-foreground shrink-0" />
+                    <p className="font-semibold text-sm text-muted-foreground">Walk-in Customer</p>
+                  </>
                 )}
               </div>
 
@@ -808,7 +863,11 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold">Payment Method</p>
-                  {profileLoading && <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />Detecting…</span>}
+                  {profileLoading && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />Detecting…
+                    </span>
+                  )}
                 </div>
 
                 {customerProfile?.credit_terms?.account_frozen && (
@@ -826,7 +885,9 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
                     <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                     <div>
                       <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Invoice overdue — grace period active</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{customerProfile.credit_terms.grace_days_remaining ?? 0} grace day(s) remaining.</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {customerProfile.credit_terms.grace_days_remaining ?? 0} grace day(s) remaining.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -842,7 +903,9 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-muted-foreground">Available credit</p>
-                      <p className="text-sm font-bold text-purple-700 dark:text-purple-300 tabular-nums">KES {parseFloat(customerProfile.credit_terms.available_credit).toLocaleString()}</p>
+                      <p className="text-sm font-bold text-purple-700 dark:text-purple-300 tabular-nums">
+                        KES {parseFloat(customerProfile.credit_terms.available_credit).toLocaleString()}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -872,8 +935,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
                         <div className="flex-1 min-w-0">
                           <p className={cn('text-sm font-bold',
                             paymentMethod === pm.value
-                              ? pm.value === 'CREDIT' ? 'text-purple-700 dark:text-purple-300'
-                              : pm.value === 'MPESA'  ? 'text-green-700 dark:text-green-300'
+                              ? pm.value === 'CREDIT'        ? 'text-purple-700 dark:text-purple-300'
+                              : pm.value === 'MPESA'         ? 'text-green-700 dark:text-green-300'
                               : pm.value === 'BANK_TRANSFER' ? 'text-blue-700 dark:text-blue-300'
                               : 'text-emerald-700 dark:text-emerald-300'
                               : 'text-foreground',
@@ -890,7 +953,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
               {/* Walk-in name */}
               {isWalkIn && (
                 <Field label="Customer Name" required>
-                  <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Enter customer name" autoFocus />
+                  <Input value={customerName} onChange={e => setCustomerName(e.target.value)}
+                    placeholder="Enter customer name" autoFocus />
                 </Field>
               )}
 
@@ -914,7 +978,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
               {selected && selected.maxQty > 0 && (
                 <Field label="Quantity">
                   <div className="py-2">
-                    <QtyStepper value={qty} max={selected.maxQty} onChange={v => { setQty(v); setQtyCollected(c => Math.min(c, v)); }} />
+                    <QtyStepper value={qty} max={selected.maxQty}
+                      onChange={v => { setQty(v); setQtyCollected(c => Math.min(c, v)); }} />
                   </div>
                   {unitPrice > 0 && (
                     <p className="text-center text-sm font-bold text-emerald-600 mt-2">
@@ -924,24 +989,30 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
                 </Field>
               )}
 
-              {/* Collect empties (bottles only) */}
-              {isBottle && selected && selected.maxQty > 0 && qty > 0 && (
+              {/* Collect empties — bottles only */}
+              {isReturnable && selected && selected.maxQty > 0 && qty > 0 && (
                 <div className="rounded-2xl border-2 border-blue-100 dark:border-blue-900/40 bg-card p-4 space-y-3">
                   <div>
-                    <p className="text-sm font-bold flex items-center gap-2"><RotateCcw className="h-4 w-4 text-blue-600" />Collect empty bottles back</p>
+                    <p className="text-sm font-bold flex items-center gap-2">
+                      <RotateCcw className="h-4 w-4 text-blue-600" />Collect empty bottles back
+                    </p>
                     <p className="text-xs text-muted-foreground mt-0.5">How many empty bottles is the customer returning now?</p>
                   </div>
                   <QtyStepperWithZero value={qtyCollected} max={qty} onChange={setQtyCollected} />
                   {qtyCollected === 0 && (
                     <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-800">
                       <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">No empties collected — customer owes {qty} bottle{qty !== 1 ? 's' : ''} back.</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        No empties collected — customer owes {qty} bottle{qty !== 1 ? 's' : ''} back.
+                      </p>
                     </div>
                   )}
                   {qtyCollected > 0 && qtyCollected < qty && (
                     <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-800">
                       <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">{qty - qtyCollected} bottle{qty - qtyCollected !== 1 ? 's' : ''} still outstanding.</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        {qty - qtyCollected} bottle{qty - qtyCollected !== 1 ? 's' : ''} still outstanding.
+                      </p>
                     </div>
                   )}
                   {qtyCollected === qty && (
@@ -955,7 +1026,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
 
               {/* Notes */}
               <Field label="Notes (optional)">
-                <Textarea rows={2} className="resize-none" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any notes about this sale…" />
+                <Textarea rows={2} className="resize-none" value={notes}
+                  onChange={e => setNotes(e.target.value)} placeholder="Any notes about this sale…" />
               </Field>
 
               {/* Actions */}
@@ -989,21 +1061,22 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({
 type SourceFilter = 'all' | 'driver' | 'admin';
 
 const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }) => {
-  const [sales,           setSales]           = useState<DirectSale[]>([]);
-  const [drivers,         setDrivers]         = useState<DriverOption[]>([]);
-  const [loading,         setLoading]         = useState(true);
-  const [search,          setSearch]          = useState('');
-  const [driverFilter,    setDriverFilter]    = useState('');
-  const [sourceFilter,    setSourceFilter]    = useState<SourceFilter>('all');
-  const [dateFrom,        setDateFrom]        = useState('');
-  const [dateTo,          setDateTo]          = useState('');
-  const [saleDialogOpen,  setSaleDialogOpen]  = useState(false);
+  const [sales,        setSales]        = useState<DirectSale[]>([]);
+  const [drivers,      setDrivers]      = useState<DriverOption[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [search,       setSearch]       = useState('');
+  const [driverFilter, setDriverFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [dateFrom,     setDateFrom]     = useState('');
+  const [dateTo,       setDateTo]       = useState('');
 
-  // Products for the dialog
-  const [bottleProducts,     setBottleProducts]     = useState<SaleProductOption[]>([]);
-  const [consumableProducts, setConsumableProducts] = useState<SaleProductOption[]>([]);
+  // ── Sale dialog state ─────────────────────────────────────────────────────
+  const [saleMode,              setSaleMode]              = useState<SaleMode>(null);
+  const [bottleProducts,        setBottleProducts]        = useState<BottleProductStore[]>([]);
+  const [consumableProducts,    setConsumableProducts]    = useState<ConsumableProductStore[]>([]);
+  const [productsLoading,       setProductsLoading]       = useState(false);
 
-  // ── Wrapper ────────────────────────────────────────────────────────────────
+  // ── Wrapper ───────────────────────────────────────────────────────────────
   const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     layout === 'manager'
       ? <ManagerLayout   title="Direct Sales" subtitle="Driver roadside sales + admin walk-in sales">{children}</ManagerLayout>
@@ -1017,30 +1090,6 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
         setDrivers(raw.map((d: Record<string, unknown>) => ({
           id:   String(d.id),
           name: `${d.first_name ?? ''} ${d.last_name ?? ''}`.trim() || String(d.email),
-        })));
-      })
-      .catch(() => {});
-  }, []);
-
-  // ── Load products for the sale dialog ────────────────────────────────────
-  useEffect(() => {
-    Promise.all([bottleStoreService.getAll(), consumableStoreService.getAll()])
-      .then(([bottles, consumables]) => {
-        setBottleProducts(bottles.map(p => ({
-          id:            p.product_id,
-          name:          p.product_name,
-          maxQty:        p.balance.full,
-          unit:          (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
-          imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
-          selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
-        })));
-        setConsumableProducts(consumables.map(p => ({
-          id:            p.product_id,
-          name:          p.product_name,
-          maxQty:        p.balance.in_stock,
-          unit:          p.unit,
-          imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
-          selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
         })));
       })
       .catch(() => {});
@@ -1060,23 +1109,9 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
         consumableStoreService.getAll(),
       ]);
 
-      // Refresh dialog products too
-      setBottleProducts(bottleProds.map(p => ({
-        id:            p.product_id,
-        name:          p.product_name,
-        maxQty:        p.balance.full,
-        unit:          (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
-        imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
-        selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
-      })));
-      setConsumableProducts(consumableProds.map(p => ({
-        id:            p.product_id,
-        name:          p.product_name,
-        maxQty:        p.balance.in_stock,
-        unit:          p.unit,
-        imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
-        selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
-      })));
+      // Keep products in state for the sale dialog
+      setBottleProducts(bottleProds);
+      setConsumableProducts(consumableProds);
 
       const normDriver: DirectSale[] = (driverSales as Array<{
         id: string; movement_date: string; product_name: string;
@@ -1086,11 +1121,17 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
 
       const rawAdmin: DirectSale[] = [
         ...extractAdminSales(
-          bottleProds.map(p => ({ product_name: p.product_name, history: p.history as StoreHistoryItem[] })),
+          bottleProds.map(p => ({
+            product_name: p.product_name,
+            history:      p.history as StoreHistoryItem[],
+          })),
           'bottle',
         ),
         ...extractAdminSales(
-          consumableProds.map(p => ({ product_name: p.product_name, history: p.history as StoreHistoryItem[] })),
+          consumableProds.map(p => ({
+            product_name: p.product_name,
+            history:      p.history as StoreHistoryItem[],
+          })),
           'consumable',
         ),
       ];
@@ -1101,13 +1142,32 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
 
       setSales(sortNewestFirst([...normDriver, ...adminSales]));
     } catch {
-      sonnerToast.error('Failed to load direct sales');
+      toast.error('Failed to load direct sales');
     } finally {
       setLoading(false);
     }
   }, [driverFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Open sale dialog — refresh products if stale ──────────────────────────
+  const openSaleDialog = async (mode: 'bottle' | 'consumable') => {
+    setSaleMode(mode);
+    // Products are already loaded via load(), but refresh if needed
+    if (bottleProducts.length === 0 && consumableProducts.length === 0) {
+      setProductsLoading(true);
+      try {
+        const [b, c] = await Promise.all([
+          bottleStoreService.getAll(),
+          consumableStoreService.getAll(),
+        ]);
+        setBottleProducts(b);
+        setConsumableProducts(c);
+      } catch { /* silent */ } finally {
+        setProductsLoading(false);
+      }
+    }
+  };
 
   // ── Filter + re-sort ──────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -1116,7 +1176,7 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(s =>
-        s.product_name.toLowerCase().includes(q) ||
+        s.product_name.toLowerCase().includes(q)              ||
         (s.driver_name       ?? '').toLowerCase().includes(q) ||
         (s.recorded_by_name  ?? '').toLowerCase().includes(q) ||
         (s.customer_name     ?? '').toLowerCase().includes(q) ||
@@ -1137,13 +1197,59 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
   const hasFilters = !!(search || driverFilter || dateFrom || dateTo || sourceFilter !== 'all');
 
   const clearFilters = () => {
-    setSearch(''); setDriverFilter(''); setDateFrom(''); setDateTo(''); setSourceFilter('all');
+    setSearch(''); setDriverFilter(''); setDateFrom(''); setDateTo('');
+    setSourceFilter('all');
   };
+
+  // ── Sale dialog products ──────────────────────────────────────────────────
+  const bottleSaleProducts: SaleProductOption[] = bottleProducts.map(p => ({
+    id:            p.product_id,
+    name:          p.product_name,
+    maxQty:        p.balance.full,
+    unit:          (p as unknown as Record<string, string>).product_unit ?? 'BOTTLES',
+    imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
+    selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
+  }));
+
+  const consumableSaleProducts: SaleProductOption[] = consumableProducts.map(p => ({
+    id:            p.product_id,
+    name:          p.product_name,
+    maxQty:        p.balance.in_stock,
+    unit:          p.unit,
+    imageUrl:      (p as unknown as Record<string, string | null>).product_image ?? null,
+    selling_price: (p as unknown as Record<string, string>).selling_price ?? undefined,
+  }));
 
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <Wrapper>
+      {/* ── Top action bar ── */}
+      <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => openSaleDialog('bottle')}
+            disabled={productsLoading}
+            className="gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
+            size="sm"
+          >
+            {productsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <Droplets className="h-4 w-4" />
+            Bottle Sale
+          </Button>
+          <Button
+            onClick={() => openSaleDialog('consumable')}
+            disabled={productsLoading}
+            className="gap-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white"
+            size="sm"
+          >
+            {productsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <Package className="h-4 w-4" />
+            Consumable Sale
+          </Button>
+        </div>
+      </div>
+
       {/* ── Stats strip ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         {[
@@ -1171,15 +1277,21 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
           <div className="flex-1 min-w-0 flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-violet-500" />
-              <span className="text-sm text-muted-foreground"><strong className="text-foreground">{driverSaleCount}</strong> driver sale{driverSaleCount !== 1 ? 's' : ''}</span>
+              <span className="text-sm text-muted-foreground">
+                <strong className="text-foreground">{driverSaleCount}</strong> driver sale{driverSaleCount !== 1 ? 's' : ''}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-teal-500" />
-              <span className="text-sm text-muted-foreground"><strong className="text-foreground">{adminSaleCount}</strong> admin sale{adminSaleCount !== 1 ? 's' : ''}</span>
+              <span className="text-sm text-muted-foreground">
+                <strong className="text-foreground">{adminSaleCount}</strong> admin sale{adminSaleCount !== 1 ? 's' : ''}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Users className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground"><strong className="text-foreground">{totalUnits}</strong> units total</span>
+              <span className="text-sm text-muted-foreground">
+                <strong className="text-foreground">{totalUnits}</strong> units total
+              </span>
             </div>
           </div>
         </div>
@@ -1208,7 +1320,10 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
             { val: 'admin'  as SourceFilter, label: 'Admin'  },
           ]).map(opt => (
             <button key={opt.val} onClick={() => setSourceFilter(opt.val)}
-              className={cn('h-8 px-3 rounded-lg text-xs font-semibold transition-colors', sourceFilter === opt.val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+              className={cn(
+                'h-8 px-3 rounded-lg text-xs font-semibold transition-colors',
+                sourceFilter === opt.val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}>
               {opt.label}
             </button>
           ))}
@@ -1226,23 +1341,19 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
 
         <div className="relative">
           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm" />
         </div>
 
         <div className="relative">
           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="pl-9 h-10 w-full sm:w-36 rounded-xl bg-muted/40 border-transparent text-sm" />
         </div>
 
-        {/* ── Refresh + New Sale ── */}
         <Button variant="outline" size="sm" className="h-10 rounded-xl gap-2 shrink-0" onClick={load} disabled={loading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           <span className="hidden sm:inline">Refresh</span>
-        </Button>
-
-        <Button size="sm" className="h-10 rounded-xl gap-2 shrink-0 bg-amber-500 hover:bg-amber-600 text-white" onClick={() => setSaleDialogOpen(true)}>
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">New Sale</span>
         </Button>
 
         {hasFilters && (
@@ -1282,13 +1393,10 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
           </div>
           <p className="font-bold text-base mb-1">No direct sales found</p>
           <p className="text-sm text-muted-foreground">
-            {hasFilters ? 'Try adjusting your filters.' : 'Sales will appear here once drivers or admins start recording them.'}
+            {hasFilters
+              ? 'Try adjusting your filters.'
+              : 'Sales will appear here once drivers or admins start recording them.'}
           </p>
-          {!hasFilters && (
-            <Button size="sm" className="mt-4 gap-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl" onClick={() => setSaleDialogOpen(true)}>
-              <Plus className="h-4 w-4" />Record First Sale
-            </Button>
-          )}
         </div>
       ) : (
         <>
@@ -1336,12 +1444,19 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
         </>
       )}
 
-      {/* ── New Sale Dialog ── */}
+      {/* ── Direct Sale Dialogs ── */}
       <DirectSaleDialog
-        open={saleDialogOpen}
-        bottleProducts={bottleProducts}
-        consumableProducts={consumableProducts}
-        onClose={() => setSaleDialogOpen(false)}
+        open={saleMode === 'bottle'}
+        mode="bottle"
+        products={bottleSaleProducts}
+        onClose={() => setSaleMode(null)}
+        onSaved={() => load()}
+      />
+      <DirectSaleDialog
+        open={saleMode === 'consumable'}
+        mode="consumable"
+        products={consumableSaleProducts}
+        onClose={() => setSaleMode(null)}
         onSaved={() => load()}
       />
     </Wrapper>
