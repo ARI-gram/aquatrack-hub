@@ -839,8 +839,34 @@ class DriverCompleteDeliveryView(APIView):
         # ── Bottle exchange ───────────────────────────────────────────────────
         if (
             delivery.order.bottle_exchange
-            and data.get('bottles_delivered') is not None
+            and (
+                data.get('bottles_delivered') is not None
+                or data.get('bottles_collected') is not None
+            )
         ):
+            exchange = delivery.order.bottle_exchange
+            exchange.bottles_delivered = data.get('bottles_delivered') or 0
+            exchange.bottles_collected = data.get('bottles_collected') or 0
+            exchange.exchange_confirmed = True
+            exchange.save()
+
+            bottles_collected = data.get('bottles_collected') or 0
+            if bottles_collected > 0:
+                for item in delivery.order.items.select_related('product').all():
+                    product = getattr(item, 'product', None)
+                    if product and getattr(product, 'is_returnable', False):
+                        BottleMovement.objects.create(
+                            product=product,
+                            driver=request.user,
+                            movement_type='RECEIVE_EMPTY',
+                            qty_expected=data.get('bottles_delivered') or 0,
+                            qty_good=bottles_collected,
+                            qty_damaged=0,
+                            qty_missing=max(
+                                0, (data.get('bottles_delivered') or 0) - bottles_collected),
+                            notes=f'Empties collected on delivery completion (order {delivery.order.order_number})',
+                        )
+                        break
             exchange = delivery.order.bottle_exchange
             exchange.bottles_delivered = data['bottles_delivered']
             exchange.bottles_collected = data.get('bottles_collected', 0)
