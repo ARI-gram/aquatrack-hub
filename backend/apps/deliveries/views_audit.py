@@ -168,8 +168,8 @@ class DriverBottleAuditView(APIView):
             agg = BottleMovement.objects.filter(
                 driver=driver,
                 movement_type='RECEIVE_EMPTY',
-                created_at__gte=date_from,   # ← scope to audit period
-                created_at__lte=date_to,  # change to recorded_at / date if needed
+                movement_date__gte=date_from,
+                movement_date__lte=date_to,
             ).aggregate(
                 good=Sum('qty_good'),
                 damaged=Sum('qty_damaged'),
