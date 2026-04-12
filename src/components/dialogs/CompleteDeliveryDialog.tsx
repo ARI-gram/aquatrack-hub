@@ -2,15 +2,19 @@
  * src/components/dialogs/CompleteDeliveryDialog.tsx
  *
  * Changes in this revision:
- *  - _submitCompletion reverted to FormData (same as original working version)
- *  - delivered_items[] removed from payload — requires backend integer fix first
- *  - Backend infers shortfall automatically from bottles_delivered total
- *  - Added: AdjustmentBanner component shown when backend returns adjustment
- *  - Added: adjustment state in SingleConfirmStep and BulkConfirmStep
- *  - Added: OrderItem.id typed as number (integer PK, not UUID)
- *  - All other UI unchanged from document 27 (original working version)
- *  - Fixed: removed all `any` casts; added CompleteDeliveryApiResponse and
- *    DriverDeliveryExtended interfaces; fixed Array.isArray guard on line 671
+ *  - FIX: initItemStates — collected_qty now initialises to item.quantity (not
+ *    cappedDelivered) so empty-bottle steppers are never locked to 0 when the
+ *    van's full-bottle stock happens to be zero.
+ *  - FIX: ItemDeliveryCard — collecting stepper max changed from
+ *    item.delivered_qty to item.ordered_qty so drivers can always record
+ *    empties regardless of how many full bottles they were able to deliver.
+ *  - FIX: updateDelivered (SingleConfirmStep & BulkConfirmStep) — collected_qty
+ *    is now capped to item.ordered_qty instead of the new delivered_qty, so
+ *    reducing delivered bottles doesn't silently zero out collected empties.
+ *  - FIX: BulkConfirmStep initItemStates stock-check branch — same treatment:
+ *    collected_qty uses ordered_qty, not the capped delivered amount.
+ *  - updateCollected cap also updated to use ordered_qty consistently.
+ *  - All other UI unchanged.
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -251,8 +255,21 @@ function initItemStates(items: OrderItem[], check?: DeliveryStockCheck): ItemSta
   return items.map(item => {
     const stockItem = check?.itemChecks.find(c => c.product_id === item.product_id);
     const available = stockItem ? stockItem.available_qty : item.quantity;
-    const cappedDelivered = check && (check.status === 'partial' || check.status === 'none') ? Math.min(item.quantity, available) : item.quantity;
-    return { product_id: item.product_id, product_name: item.product_name, product_unit: item.product_unit, is_returnable: item.is_returnable, ordered_qty: item.quantity, delivered_qty: cappedDelivered, collected_qty: item.is_returnable ? cappedDelivered : 0 };
+    const cappedDelivered = check && (check.status === 'partial' || check.status === 'none')
+      ? Math.min(item.quantity, available)
+      : item.quantity;
+    return {
+      product_id:    item.product_id,
+      product_name:  item.product_name,
+      product_unit:  item.product_unit,
+      is_returnable: item.is_returnable,
+      ordered_qty:   item.quantity,
+      delivered_qty: cappedDelivered,
+      // ✅ FIX: collecting empties is independent of van stock — always default
+      // to the full ordered quantity so the stepper is never locked at 0.
+      // The driver can reduce it manually if the customer doesn't hand back all empties.
+      collected_qty: item.is_returnable ? item.quantity : 0,
+    };
   });
 }
 
@@ -268,9 +285,6 @@ async function _submitCompletion(
   fd: FormData,
 ): Promise<{ ok: true; adjustment: DeliveryAdjustment | null } | { ok: false; requiresOtp: true }> {
   try {
-    // Cast the service call to accept FormData and return our typed response.
-    // The runtime payload is FormData; the cast is safe because the service
-    // forwards it as-is to the API endpoint.
     const completeWithFormData = deliveryService.completeDelivery as (
       id: string,
       data: FormData,
@@ -367,7 +381,9 @@ const ItemDeliveryCard: React.FC<{ item: ItemState; onDeliveredChange: (qty: num
       {item.is_returnable ? (
         <div className="grid grid-cols-2 gap-3">
           <BottleStepper label="Delivering" sublabel={`Full ${unit} out`} value={item.delivered_qty} onChange={onDeliveredChange} accent="blue" />
-          <BottleStepper label="Collecting" sublabel={`Empty ${unit} back`} value={item.collected_qty} onChange={onCollectedChange} max={item.delivered_qty} accent="amber" />
+          {/* ✅ FIX: max is ordered_qty not delivered_qty — driver can collect empties
+              even when van stock was zero and delivered_qty was capped to 0 */}
+          <BottleStepper label="Collecting" sublabel={`Empty ${unit} back`} value={item.collected_qty} onChange={onCollectedChange} max={item.ordered_qty} accent="amber" />
         </div>
       ) : (
         <BottleStepper label={`Delivering (${unit})`} sublabel={`Max: ${item.ordered_qty} ordered`} value={item.delivered_qty} onChange={onDeliveredChange} max={item.ordered_qty} accent="blue" />
@@ -403,8 +419,6 @@ const SingleConfirmStep: React.FC<{
   onBack: (()=>void)|null; onComplete: ()=>void;
   onNeedsOtp: (deliveryId: string, retryFn: ()=>void)=>void;
 }> = ({ delivery, stockCheck, onBack, onComplete, onNeedsOtp }) => {
-  // Cast once to the extended type so we can read optional serializer fields
-  // without repeated casts and without unsafe `any`.
   const deliveryExt = delivery as DriverDeliveryExtended;
 
   const rawItems: OrderItem[] = (delivery as DriverDeliveryWithItems).order_items ?? [];
@@ -421,8 +435,22 @@ const SingleConfirmStep: React.FC<{
   const [amountCollected, setAmountCollected] = useState(() => expectedAmount > 0 ? expectedAmount.toFixed(2) : '');
   const isCashOrder = deliveryExt.order_payment_method === 'CASH';
 
-  const updateDelivered = (pid: string, qty: number) => setItemStates(p => p.map(i => i.product_id!==pid ? i : { ...i, delivered_qty: Math.max(0,qty), collected_qty: i.is_returnable ? Math.min(i.collected_qty, Math.max(0,qty)) : i.collected_qty }));
-  const updateCollected = (pid: string, qty: number) => setItemStates(p => p.map(i => i.product_id!==pid ? i : { ...i, collected_qty: Math.min(Math.max(0,qty), i.delivered_qty) }));
+  // ✅ FIX: when driver reduces delivered qty, don't reduce collected_qty —
+  // collected empties are independent of how many full bottles were delivered.
+  // Cap collected to ordered_qty (not delivered_qty).
+  const updateDelivered = (pid: string, qty: number) => setItemStates(p => p.map(i =>
+    i.product_id !== pid ? i : {
+      ...i,
+      delivered_qty: Math.max(0, qty),
+      collected_qty: i.is_returnable ? Math.min(i.collected_qty, i.ordered_qty) : i.collected_qty,
+    }
+  ));
+  const updateCollected = (pid: string, qty: number) => setItemStates(p => p.map(i =>
+    i.product_id !== pid ? i : {
+      ...i,
+      collected_qty: Math.min(Math.max(0, qty), i.ordered_qty),
+    }
+  ));
 
   const isShort = itemStates.some(i => i.delivered_qty < i.ordered_qty);
   const hasItems = itemStates.length > 0;
@@ -499,12 +527,37 @@ const BulkConfirmStep: React.FC<{
     if (rawItems.length > 0) {
       const merged: Record<string, ItemState> = {};
       for (const item of rawItems) {
-        if (merged[item.product_id]) { merged[item.product_id].ordered_qty+=item.quantity; merged[item.product_id].delivered_qty+=item.quantity; merged[item.product_id].collected_qty+=item.quantity; }
-        else merged[item.product_id] = { product_id: item.product_id, product_name: item.product_name, product_unit: item.product_unit, is_returnable: item.is_returnable, ordered_qty: item.quantity, delivered_qty: item.quantity, collected_qty: item.quantity };
+        if (merged[item.product_id]) {
+          merged[item.product_id].ordered_qty   += item.quantity;
+          merged[item.product_id].delivered_qty += item.quantity;
+          // ✅ FIX: accumulate collected from ordered_qty not delivered_qty
+          merged[item.product_id].collected_qty += item.is_returnable ? item.quantity : 0;
+        } else {
+          merged[item.product_id] = {
+            product_id:    item.product_id,
+            product_name:  item.product_name,
+            product_unit:  item.product_unit,
+            is_returnable: item.is_returnable,
+            ordered_qty:   item.quantity,
+            delivered_qty: item.quantity,
+            // ✅ FIX: default collected to ordered quantity, not delivered
+            collected_qty: item.is_returnable ? item.quantity : 0,
+          };
+        }
       }
       const states = Object.values(merged);
-      if (stockCheck && (stockCheck.status==='partial'||stockCheck.status==='none')) {
-        return states.map(s => { const sc = stockCheck.itemChecks.find(c=>c.product_id===s.product_id); const available = sc ? sc.available_qty : s.ordered_qty; const capped = Math.min(s.ordered_qty, available); return { ...s, delivered_qty: capped, collected_qty: s.is_returnable ? capped : 0 }; });
+      if (stockCheck && (stockCheck.status === 'partial' || stockCheck.status === 'none')) {
+        return states.map(s => {
+          const sc = stockCheck.itemChecks.find(c => c.product_id === s.product_id);
+          const available = sc ? sc.available_qty : s.ordered_qty;
+          const capped = Math.min(s.ordered_qty, available);
+          return {
+            ...s,
+            delivered_qty: capped,
+            // ✅ FIX: don't cap collected to capped delivered — use ordered_qty
+            collected_qty: s.is_returnable ? s.ordered_qty : 0,
+          };
+        });
       }
       return states;
     }
@@ -521,8 +574,20 @@ const BulkConfirmStep: React.FC<{
   const [progress, setProgress]         = useState<{done:number;total:number}|null>(null);
   const [adjustment, setAdjustment]     = useState<DeliveryAdjustment|null>(null);
 
-  const updateDelivered = (pid: string, qty: number) => setItemStates(p => p.map(i => i.product_id!==pid ? i : { ...i, delivered_qty: Math.max(0,qty), collected_qty: i.is_returnable ? Math.min(i.collected_qty, Math.max(0,qty)) : i.collected_qty }));
-  const updateCollected = (pid: string, qty: number) => setItemStates(p => p.map(i => i.product_id!==pid ? i : { ...i, collected_qty: Math.min(Math.max(0,qty), i.delivered_qty) }));
+  // ✅ FIX: same as SingleConfirmStep — collected is independent of delivered
+  const updateDelivered = (pid: string, qty: number) => setItemStates(p => p.map(i =>
+    i.product_id !== pid ? i : {
+      ...i,
+      delivered_qty: Math.max(0, qty),
+      collected_qty: i.is_returnable ? Math.min(i.collected_qty, i.ordered_qty) : i.collected_qty,
+    }
+  ));
+  const updateCollected = (pid: string, qty: number) => setItemStates(p => p.map(i =>
+    i.product_id !== pid ? i : {
+      ...i,
+      collected_qty: Math.min(Math.max(0, qty), i.ordered_qty),
+    }
+  ));
 
   const isShort = itemStates.some(i => i.delivered_qty < i.ordered_qty);
   const hasItems = itemStates.length > 0;
@@ -712,8 +777,6 @@ export const CompleteDeliveryDialog: React.FC<{
       setLoading(true);
       try {
         const data = await deliveryService.getDriverDeliveries();
-        // getDriverDeliveries may return either a plain array or a paginated
-        // response object depending on the service implementation.
         const raw: DriverDelivery[] = Array.isArray(data)
           ? data
           : (data.deliveries ?? []);
