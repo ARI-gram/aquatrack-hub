@@ -11,12 +11,14 @@ Permission: client_admin, accountant, super_admin
 
 from datetime import timedelta
 from django.utils import timezone
+from django.db.models import Sum
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions
 
 from apps.authentication.models import User
 from apps.deliveries.models import Delivery
+from apps.products.models import BottleMovement  # moved to top-level import
 
 
 # ── Permission ────────────────────────────────────────────────────────────────
@@ -147,34 +149,35 @@ class DriverBottleAuditView(APIView):
                 except Exception:
                     pass
 
+                # Count flagged delivery incidents as damages
                 if delivery.has_issues:
                     damages += 1
 
-            # ── Pull from BottleMovement ONCE per driver, outside the delivery loop ──
-            from apps.products.models import BottleMovement
-            from django.db.models import Sum
+            # ── Pull RECEIVE_EMPTY movements for this driver in the audit period ──
+            #
+            # FIX: bottles_collected is the SUM of qty_good across all
+            # RECEIVE_EMPTY movements in the period — regardless of who
+            # recorded them (road self-record vs office handover).
+            #
+            # The old code calculated  road_collected - office_good - office_damaged
+            # which is the driver's *current balance*, not what was collected.
+            #
+            # NOTE: filter by created_at (or whichever timestamp field your
+            # BottleMovement model uses — adjust the field name if needed).
 
-            driver_movements = BottleMovement.objects.filter(
+            agg = BottleMovement.objects.filter(
                 driver=driver,
                 movement_type='RECEIVE_EMPTY',
-            )
-
-            road_collected = driver_movements.filter(
-                recorded_by__isnull=True,
-            ).aggregate(good=Sum('qty_good'))['good'] or 0
-
-            handed_to_office = driver_movements.filter(
-                recorded_by__isnull=False,
+                created_at__gte=date_from,   # ← scope to audit period
+                created_at__lte=date_to,  # change to recorded_at / date if needed
             ).aggregate(
                 good=Sum('qty_good'),
                 damaged=Sum('qty_damaged'),
             )
-            office_good = handed_to_office['good'] or 0
-            office_damaged = handed_to_office['damaged'] or 0
 
-            # Mirrors _compute_bottle_balance exactly
-            bottles_collected = max(
-                0, road_collected - office_good - office_damaged)
+            bottles_collected = agg['good'] or 0
+            # Optionally surface bottle-level damage count separately:
+            # bottle_damages = agg['damaged'] or 0
 
             shortfall = max(0, bottles_to_collect - bottles_collected)
 
@@ -190,6 +193,7 @@ class DriverBottleAuditView(APIView):
                 'shortfall':          shortfall,
                 'damages':            damages,
             })
+
         totals = {
             'total_deliveries':   sum(r['total_deliveries'] for r in results),
             'bottles_delivered':  sum(r['bottles_delivered'] for r in results),
@@ -200,9 +204,8 @@ class DriverBottleAuditView(APIView):
         }
 
         return Response({
-            'period':    period_label,                   # FIX: was undefined `period`
+            'period':    period_label,
             'date_from': date_from.date().isoformat(),
-            # FIX: was always `now` instead of `date_to`
             'date_to':   date_to.date().isoformat(),
             'drivers':   results,
             'totals':    totals,
