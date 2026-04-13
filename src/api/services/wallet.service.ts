@@ -2,13 +2,17 @@
  * Wallet Service
  * Handles wallet operations, top-ups, and transactions
  *
- * Backend endpoints (mounted at /api/wallet/):
- *   GET    /api/wallet/              → WalletView
- *   POST   /api/wallet/topup         → WalletTopUpView
- *   GET    /api/wallet/transactions  → WalletTransactionListView
+ * Backend endpoints (mounted at /api/customer/wallet/):
+ *   GET  /api/customer/wallet/              → WalletView
+ *   POST /api/customer/wallet/topup/        → WalletTopUpView
+ *   GET  /api/customer/wallet/transactions/ → WalletTransactionListView
+ *   PUT  /api/customer/wallet/auto-topup/   → WalletAutoTopUpSettingsView
  */
 
 import axiosInstance from '../axios.config';
+import { CUSTOMER_API_ENDPOINTS } from '@/api/customerEndpoints';
+
+const W = CUSTOMER_API_ENDPOINTS.WALLET;
 
 // ── Types aligned to Django serializers ───────────────────────────────────────
 
@@ -68,33 +72,30 @@ export interface WalletSettingsUpdate {
 // ── Service ───────────────────────────────────────────────────────────────────
 
 export const walletService = {
-  /** GET /api/wallet/ */
+  /** GET /api/customer/wallet/ */
   async getWallet(): Promise<CustomerWallet> {
-    const { data } = await axiosInstance.get<CustomerWallet>('/wallet/');
+    const { data } = await axiosInstance.get<CustomerWallet>(W.GET);
     return data;
   },
 
-  /** POST /api/wallet/topup */
+  /** POST /api/customer/wallet/topup/ */
   async topUp(request: TopUpRequest): Promise<WalletTransaction> {
-    const { data } = await axiosInstance.post<WalletTransaction>('/wallet/topup', request);
+    const { data } = await axiosInstance.post<WalletTransaction>(W.TOPUP, request);
     return data;
   },
 
-  /** GET /api/wallet/transactions */
+  /** GET /api/customer/wallet/transactions/ */
   async getTransactions(params?: {
     transaction_type?: WalletTransaction['transaction_type'];
     limit?: number;
   }): Promise<WalletTransaction[]> {
-    const { data } = await axiosInstance.get<WalletTransaction[]>(
-      '/wallet/transactions',
-      { params }
-    );
+    const { data } = await axiosInstance.get<WalletTransaction[]>(W.TRANSACTIONS, { params });
     return data;
   },
 
-  /** PUT /api/wallet/ */
+  /** PUT /api/customer/wallet/auto-topup/ */
   async updateSettings(settings: WalletSettingsUpdate): Promise<CustomerWallet> {
-    const { data } = await axiosInstance.put<CustomerWallet>('/wallet/', settings);
+    const { data } = await axiosInstance.put<CustomerWallet>(W.AUTO_TOPUP_SETTINGS, settings);
     return data;
   },
 
