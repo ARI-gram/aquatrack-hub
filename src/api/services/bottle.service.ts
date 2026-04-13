@@ -6,13 +6,11 @@
 import axiosInstance from '../axios.config';
 import { CUSTOMER_API_ENDPOINTS } from '../customerEndpoints';
 import {
-  BottleTransactionType,
   type BottleInventory,
   type BottleTransaction,
   type BottlePurchaseRequest,
   type BottleExchangeConfirmation,
   type BottleDepositInfo,
-  BottleActivityItem,
 } from '@/types/bottle.types';
 
 export const bottleService = {
@@ -81,48 +79,3 @@ export const bottleService = {
     return response.data;
   },
 };
-
-// Mock data for development
-export const mockBottleInventory: BottleInventory = {
-  customerId: 'cust-001',
-  totalOwned: 10,
-  fullBottles: 3,
-  emptyBottles: 5,
-  inTransit: 2,
-  atDistributor: 0,
-  depositPerBottle: 10,
-  totalDeposit: 100,
-  lastUpdated: new Date().toISOString(),
-};
-
-export const mockBottleActivity: BottleActivityItem[] = [
-  {
-    id: '1',
-    date: '2024-01-30',
-    type: BottleTransactionType.REFILL_DELIVERED,
-    orderId: 'ord-123',
-    orderNumber: 'ORD-2024-045',
-    quantity: 5,
-    status: 'IN_TRANSIT',
-    description: 'Refilled 5 bottles',
-  },
-  {
-    id: '2',
-    date: '2024-01-28',
-    type: BottleTransactionType.REFILL_DELIVERED,
-    orderId: 'ord-122',
-    orderNumber: 'ORD-2024-042',
-    quantity: 3,
-    status: 'COMPLETED',
-    description: 'Refilled 3 bottles',
-  },
-  {
-    id: '3',
-    date: '2024-01-25',
-    type: BottleTransactionType.PURCHASE,
-    orderNumber: 'PUR-2024-010',
-    quantity: 5,
-    status: 'COMPLETED',
-    description: 'Purchased 5 new bottles',
-  },
-];

@@ -1,81 +1,85 @@
 /**
- * Bottle Management Service
- * Handles bottle inventory, purchases, and exchanges
+ * Billing Service
+ * /src/api/services/billing.service.ts
+ *
+ * Handles all billing, subscription and invoice API calls.
  */
 
 import axiosInstance from '../axios.config';
-import { CUSTOMER_API_ENDPOINTS } from '../customerEndpoints';
-import {
-  type BottleInventory,
-  type BottleTransaction,
-  type BottlePurchaseRequest,
-  type BottleExchangeConfirmation,
-  type BottleDepositInfo,
-} from '@/types/bottle.types';
+import { API_ENDPOINTS } from '../endpoints';
+import type {
+  Subscription,
+  Invoice,
+  BillingStats,
+  MarkInvoicePaidRequest,
+  InvoiceFilters,
+  PaginatedInvoicesResponse,
+} from '@/types/billing.types';
 
-export const bottleService = {
+export const billingService = {
+  // ─── Subscriptions ──────────────────────────────────────────────────────────
+
   /**
-   * Get customer's bottle inventory
+   * GET /api/billing/subscriptions/
+   * All client subscriptions sorted by days until due.
+   * Used by BillingPlansPage to populate warnings and subscription list.
    */
-  async getInventory(): Promise<BottleInventory> {
-    const response = await axiosInstance.get<BottleInventory>(
-      CUSTOMER_API_ENDPOINTS.BOTTLES.INVENTORY
+  async getSubscriptions(): Promise<Subscription[]> {
+    const res = await axiosInstance.get<Subscription[]>(
+      API_ENDPOINTS.BILLING.SUBSCRIPTIONS
     );
-    return response.data;
+    return res.data;
   },
 
   /**
-   * Get bottle transaction history
+   * GET /api/billing/subscriptions/stats/
+   * Aggregate revenue and conversion metrics for the Revenue Overview tab.
    */
-  async getHistory(params?: {
-    page?: number;
-    limit?: number;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<{ transactions: BottleTransaction[]; total: number }> {
-    const response = await axiosInstance.get(
-      CUSTOMER_API_ENDPOINTS.BOTTLES.HISTORY,
-      { params }
+  async getStats(): Promise<BillingStats> {
+    const res = await axiosInstance.get<BillingStats>(
+      API_ENDPOINTS.BILLING.STATS
     );
-    return response.data;
+    return res.data;
+  },
+
+  // ─── Invoices ───────────────────────────────────────────────────────────────
+
+  /**
+   * GET /api/billing/invoices/
+   * Paginated invoice list with optional filters.
+   */
+  async getInvoices(filters?: InvoiceFilters): Promise<PaginatedInvoicesResponse> {
+    const res = await axiosInstance.get<PaginatedInvoicesResponse>(
+      API_ENDPOINTS.BILLING.INVOICES,
+      { params: filters }
+    );
+    return res.data;
   },
 
   /**
-   * Purchase additional bottles
+   * GET /api/billing/invoices/{id}/
    */
-  async purchaseBottles(request: BottlePurchaseRequest): Promise<{
-    success: boolean;
-    transactionId: string;
-    newInventory: BottleInventory;
-  }> {
-    const response = await axiosInstance.post(
-      CUSTOMER_API_ENDPOINTS.BOTTLES.PURCHASE,
-      request
+  async getInvoiceById(id: string): Promise<Invoice> {
+    const res = await axiosInstance.get<Invoice>(
+      API_ENDPOINTS.BILLING.INVOICE_BY_ID(id)
     );
-    return response.data;
+    return res.data;
   },
 
   /**
-   * Get deposit information
+   * POST /api/billing/invoices/{id}/mark-paid/
+   * Mark an invoice as paid with M-Pesa / bank / cash reference.
    */
-  async getDepositInfo(): Promise<BottleDepositInfo> {
-    const response = await axiosInstance.get<BottleDepositInfo>(
-      CUSTOMER_API_ENDPOINTS.BOTTLES.DEPOSIT_INFO
+  async markInvoicePaid(
+    id: string,
+    data: MarkInvoicePaidRequest
+  ): Promise<{ message: string; invoice: Invoice }> {
+    const res = await axiosInstance.post<{ message: string; invoice: Invoice }>(
+      API_ENDPOINTS.BILLING.MARK_PAID(id),
+      data
     );
-    return response.data;
-  },
-
-  /**
-   * Confirm bottle exchange after delivery
-   */
-  async confirmExchange(
-    orderId: string,
-    confirmation: Omit<BottleExchangeConfirmation, 'orderId' | 'confirmedAt'>
-  ): Promise<BottleExchangeConfirmation> {
-    const response = await axiosInstance.post<BottleExchangeConfirmation>(
-      CUSTOMER_API_ENDPOINTS.BOTTLES.CONFIRM_EXCHANGE(orderId),
-      confirmation
-    );
-    return response.data;
+    return res.data;
   },
 };
+
+export default billingService;
