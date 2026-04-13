@@ -3,7 +3,7 @@
  * Dedicated page for bottle inventory management
  */
 
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomerLayout } from '@/components/layout/CustomerLayout';
 import { BottleTracker } from '@/components/customer/BottleTracker';
@@ -11,9 +11,11 @@ import { BottleHistory } from '@/components/customer/BottleTracker/BottleHistory
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { CUSTOMER_ROUTES } from '@/constants/customerRoutes';
-import { CUSTOMER_PRICING } from '@/constants/pricing';
-import { BottleTransactionType, type BottleInventory, type BottleActivityItem } from '@/types/bottle.types';
+import { bottleService } from '@/api/services/bottle.service';
+import type { AxiosError } from 'axios';
+import { type BottleInventory, type BottleActivityItem } from '@/types/bottle.types';
 import {
   Plus,
   Info,
@@ -26,68 +28,104 @@ import {
   AlertDescription,
 } from '@/components/ui/alert';
 
-// Mock data
-const mockInventory: BottleInventory = {
-  customerId: 'customer-001',
-  totalOwned: 10,
-  fullBottles: 3,
-  emptyBottles: 5,
-  inTransit: 2,
-  atDistributor: 0,
-  depositPerBottle: CUSTOMER_PRICING.BOTTLE_DEPOSIT,
-  totalDeposit: 10 * CUSTOMER_PRICING.BOTTLE_DEPOSIT,
-  lastUpdated: new Date().toISOString(),
-};
+// ─── Loading skeleton ─────────────────────────────────────────────────────────
 
-const mockHistory: BottleActivityItem[] = [
-  {
-    id: '1',
-    date: '2024-01-30',
-    type: BottleTransactionType.REFILL_DELIVERED,
-    quantity: 5,
-    orderNumber: 'ORD-12345',
-    status: 'IN_TRANSIT',
-    description: 'Refill delivery in progress',
-  },
-  {
-    id: '2',
-    date: '2024-01-28',
-    type: BottleTransactionType.REFILL_DELIVERED,
-    quantity: 3,
-    orderNumber: 'ORD-12340',
-    status: 'COMPLETED',
-    description: 'Refill delivery completed',
-  },
-  {
-    id: '3',
-    date: '2024-01-25',
-    type: BottleTransactionType.PURCHASE,
-    quantity: 5,
-    orderNumber: 'ORD-12335',
-    status: 'COMPLETED',
-    description: 'Purchased 5 new bottles',
-  },
-  {
-    id: '4',
-    date: '2024-01-20',
-    type: BottleTransactionType.REFILL_DELIVERED,
-    quantity: 4,
-    orderNumber: 'ORD-12330',
-    status: 'COMPLETED',
-    description: 'Refill delivery completed',
-  },
-];
+const BottlesPageSkeleton: React.FC = () => (
+  <div className="space-y-6">
+    <Skeleton className="h-40 w-full rounded-2xl" />
+    <Skeleton className="h-20 w-full rounded-xl" />
+    <div className="grid grid-cols-2 gap-3">
+      <Skeleton className="h-16 rounded-xl" />
+      <Skeleton className="h-16 rounded-xl" />
+    </div>
+    <div className="space-y-3">
+      {[1, 2, 3].map((i) => (
+        <Skeleton key={i} className="h-16 w-full rounded-xl" />
+      ))}
+    </div>
+  </div>
+);
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 const BottlesPage: React.FC = () => {
   const navigate = useNavigate();
-  
-  const totalDeposit = mockInventory.totalOwned * mockInventory.depositPerBottle;
 
+  const [inventory, setInventory] = useState<BottleInventory | null>(null);
+  const [activities, setActivities] = useState<BottleActivityItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [inv, hist] = await Promise.all([
+        bottleService.getInventory(),
+        bottleService.getHistory({ limit: 20 }),
+      ]);
+      setInventory(inv);
+      setActivities(hist.activities);
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ detail?: string }>;
+      const message =
+        axiosErr?.response?.data?.detail ??
+        axiosErr?.message ??
+        'Could not load bottle data. Please try again.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // ── Render: loading ─────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <CustomerLayout title="My Bottles">
+        <BottlesPageSkeleton />
+      </CustomerLayout>
+    );
+  }
+
+  // ── Render: error ───────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <CustomerLayout title="My Bottles">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        <Button variant="outline" className="mt-4 w-full" onClick={fetchData}>
+          Try Again
+        </Button>
+      </CustomerLayout>
+    );
+  }
+
+  // ── Render: no inventory (edge case) ────────────────────────────────────────
+  if (!inventory) {
+    return (
+      <CustomerLayout title="My Bottles">
+        <p className="text-center text-muted-foreground py-12">
+          No bottle inventory found.
+        </p>
+      </CustomerLayout>
+    );
+  }
+
+  const totalDeposit = inventory.totalOwned * inventory.depositPerBottle;
+
+  // ── Render: main ────────────────────────────────────────────────────────────
   return (
     <CustomerLayout title="My Bottles">
       <div className="space-y-6">
+
         {/* Bottle Tracker */}
-        <BottleTracker inventory={mockInventory} />
+        <BottleTracker inventory={inventory} />
 
         {/* Deposit Info */}
         <Card className="p-4">
@@ -99,7 +137,7 @@ const BottlesPage: React.FC = () => {
               <div>
                 <p className="font-medium">Deposit on File</p>
                 <p className="text-sm text-muted-foreground">
-                  ${mockInventory.depositPerBottle} per bottle × {mockInventory.totalOwned} bottles
+                  ${inventory.depositPerBottle} per bottle × {inventory.totalOwned} bottles
                 </p>
               </div>
             </div>
@@ -131,7 +169,7 @@ const BottlesPage: React.FC = () => {
         </div>
 
         {/* Low bottles warning */}
-        {mockInventory.emptyBottles <= 2 && (
+        {inventory.emptyBottles <= 2 && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
@@ -144,9 +182,9 @@ const BottlesPage: React.FC = () => {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Bottle Activity</h3>
-            <Badge variant="secondary">{mockHistory.length} transactions</Badge>
+            <Badge variant="secondary">{activities.length} transactions</Badge>
           </div>
-          <BottleHistory activities={mockHistory} />
+          <BottleHistory activities={activities} />
         </div>
 
         {/* Info Card */}
@@ -164,6 +202,7 @@ const BottlesPage: React.FC = () => {
             </div>
           </div>
         </Card>
+
       </div>
     </CustomerLayout>
   );
