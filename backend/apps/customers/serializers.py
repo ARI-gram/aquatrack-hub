@@ -215,17 +215,34 @@ class VerifyOTPSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         from rest_framework_simplejwt.tokens import RefreshToken
+        from django.contrib.auth import get_user_model
 
+        User = get_user_model()
         customer = validated_data['customer']
-        refresh = RefreshToken()
+
+        # Get or create a Django User for this customer
+        # Username = phone number (unique per customer)
+        user, _ = User.objects.get_or_create(
+            username=customer.phone_number,
+            defaults={
+                'email': customer.email or '',
+                'first_name': (customer.full_name or '').split(' ')[0],
+                'last_name': ' '.join((customer.full_name or '').split(' ')[1:]),
+            }
+        )
+
+        # Generate a proper token tied to the Django User
+        refresh = RefreshToken.for_user(user)
+        # Embed customer info as extra claims
         refresh['customer_id'] = str(customer.id)
         refresh['phone'] = customer.phone_number
+        refresh['role'] = 'customer'
 
         return {
             'customer': CustomerSerializer(customer).data,
             'tokens': {
                 'refresh': str(refresh),
-                'access': str(refresh.access_token),
+                'access':  str(refresh.access_token),
             }
         }
 
