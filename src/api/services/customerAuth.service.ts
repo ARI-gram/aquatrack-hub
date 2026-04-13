@@ -94,7 +94,7 @@ export const customerAuthService = {
    * Check if customer is authenticated
    */
   isAuthenticated(): boolean {
-    return !!localStorage.getItem('customer_token');
+    return !!localStorage.getItem('aquatrack_token');
   },
 
   /**
@@ -109,7 +109,12 @@ export const customerAuthService = {
    * Store authentication data
    */
   storeAuthData(authResponse: CustomerAuthResponse): void {
-    localStorage.setItem('customer_token', authResponse.token);
+    localStorage.setItem('aquatrack_token', authResponse.token);              // ✅ was 'customer_token'
+    localStorage.setItem('aquatrack_refresh_token', authResponse.refreshToken); // ✅ add this
+    localStorage.setItem('aquatrack_user', JSON.stringify({                    // ✅ needed for role check
+      role: 'customer',
+      ...authResponse.customer,
+    }));
     localStorage.setItem('customer_data', JSON.stringify(authResponse.customer));
   },
 };
