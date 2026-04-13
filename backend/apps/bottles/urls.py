@@ -7,8 +7,7 @@ from apps.bottles.views import (
 app_name = 'bottles'
 
 urlpatterns = [
-    path('inventory/',    BottleInventoryView.as_view(),       name='inventory'),
-    path('transactions/', BottleTransactionListView.as_view(), name='transactions'),
-    path('history/',      BottleTransactionListView.as_view(),
-         name='history'),  # frontend alias
+    # Bottle inventory
+    path('inventory', BottleInventoryView.as_view(), name='inventory'),
+    path('transactions', BottleTransactionListView.as_view(), name='transactions'),
 ]
