@@ -1,16 +1,12 @@
 /**
  * Bottle Management Service
  *
- * Backend endpoints (mounted at /api/customer/bottles/):
- *   GET  /api/customer/bottles/inventory/                  → BottleInventoryView
- *   GET  /api/customer/bottles/history/                    → BottleTransactionListView
- *   POST /api/customer/bottles/purchase/                   → BottlePurchaseView
- *   GET  /api/customer/bottles/deposit-info/               → BottleDepositInfoView
- *   POST /api/customer/bottles/exchange/:orderId/confirm/  → BottleExchangeConfirmView
+ * Backend endpoints (mounted at /api/bottles/):
+ *   GET  /api/bottles/inventory     → BottleInventoryView
+ *   GET  /api/bottles/transactions  → BottleTransactionListView
  */
 
 import axiosInstance from '../axios.config';
-import { CUSTOMER_API_ENDPOINTS } from '@/api/customerEndpoints';
 import {
   type BottleInventory,
   type BottleTransaction,
@@ -19,49 +15,55 @@ import {
   type BottleDepositInfo,
 } from '@/types/bottle.types';
 
-const B = CUSTOMER_API_ENDPOINTS.BOTTLES;
-
 export const bottleService = {
-  /** GET /api/customer/bottles/inventory/ */
+  /** GET /api/bottles/inventory */
   async getInventory(): Promise<BottleInventory> {
-    const { data } = await axiosInstance.get<BottleInventory>(B.INVENTORY);
+    const { data } = await axiosInstance.get<BottleInventory>('/bottles/inventory');
     return data;
   },
 
-  /** GET /api/customer/bottles/history/ */
+  /** GET /api/bottles/transactions */
   async getHistory(params?: {
     page?: number;
     limit?: number;
     startDate?: string;
     endDate?: string;
   }): Promise<{ transactions: BottleTransaction[]; total: number }> {
-    const { data } = await axiosInstance.get(B.HISTORY, { params });
+    const { data } = await axiosInstance.get('/bottles/transactions', { params });
     return data;
   },
 
-  /** POST /api/customer/bottles/purchase/ */
+  /**
+   * Purchase additional bottles
+   * NOTE: No dedicated endpoint exists yet on the backend.
+   * Wire this up once the backend route is added.
+   */
   async purchaseBottles(request: BottlePurchaseRequest): Promise<{
     success: boolean;
     transactionId: string;
     newInventory: BottleInventory;
   }> {
-    const { data } = await axiosInstance.post(B.PURCHASE, request);
+    const { data } = await axiosInstance.post('/bottles/purchase', request);
     return data;
   },
 
-  /** GET /api/customer/bottles/deposit-info/ */
+  /**
+   * Get deposit information
+   * NOTE: No dedicated endpoint exists yet — deposit info is
+   * included in the inventory response. Use getInventory() instead.
+   */
   async getDepositInfo(): Promise<BottleDepositInfo> {
-    const { data } = await axiosInstance.get<BottleDepositInfo>(B.DEPOSIT_INFO);
+    const { data } = await axiosInstance.get<BottleDepositInfo>('/bottles/deposit-info');
     return data;
   },
 
-  /** POST /api/customer/bottles/exchange/:orderId/confirm/ */
+  /** Confirm bottle exchange after delivery */
   async confirmExchange(
     orderId: string,
     confirmation: Omit<BottleExchangeConfirmation, 'orderId' | 'confirmedAt'>
   ): Promise<BottleExchangeConfirmation> {
     const { data } = await axiosInstance.post<BottleExchangeConfirmation>(
-      B.CONFIRM_EXCHANGE(orderId),
+      `/bottles/${orderId}/confirm-exchange`,
       confirmation
     );
     return data;
