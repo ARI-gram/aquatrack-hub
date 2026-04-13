@@ -3,7 +3,7 @@
  * Dedicated page for bottle inventory management
  */
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomerLayout } from '@/components/layout/CustomerLayout';
 import { BottleTracker } from '@/components/customer/BottleTracker';
@@ -11,10 +11,9 @@ import { BottleHistory } from '@/components/customer/BottleTracker/BottleHistory
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { CUSTOMER_ROUTES } from '@/constants/customerRoutes';
-import { bottleService } from '@/api/services/bottle.service';
-import { type BottleInventory, type BottleActivityItem } from '@/types/bottle.types';
+import { CUSTOMER_PRICING } from '@/constants/pricing';
+import { BottleTransactionType, type BottleInventory, type BottleActivityItem } from '@/types/bottle.types';
 import {
   Plus,
   Info,
@@ -27,78 +26,68 @@ import {
   AlertDescription,
 } from '@/components/ui/alert';
 
+// Mock data
+const mockInventory: BottleInventory = {
+  customerId: 'customer-001',
+  totalOwned: 10,
+  fullBottles: 3,
+  emptyBottles: 5,
+  inTransit: 2,
+  atDistributor: 0,
+  depositPerBottle: CUSTOMER_PRICING.BOTTLE_DEPOSIT,
+  totalDeposit: 10 * CUSTOMER_PRICING.BOTTLE_DEPOSIT,
+  lastUpdated: new Date().toISOString(),
+};
+
+const mockHistory: BottleActivityItem[] = [
+  {
+    id: '1',
+    date: '2024-01-30',
+    type: BottleTransactionType.REFILL_DELIVERED,
+    quantity: 5,
+    orderNumber: 'ORD-12345',
+    status: 'IN_TRANSIT',
+    description: 'Refill delivery in progress',
+  },
+  {
+    id: '2',
+    date: '2024-01-28',
+    type: BottleTransactionType.REFILL_DELIVERED,
+    quantity: 3,
+    orderNumber: 'ORD-12340',
+    status: 'COMPLETED',
+    description: 'Refill delivery completed',
+  },
+  {
+    id: '3',
+    date: '2024-01-25',
+    type: BottleTransactionType.PURCHASE,
+    quantity: 5,
+    orderNumber: 'ORD-12335',
+    status: 'COMPLETED',
+    description: 'Purchased 5 new bottles',
+  },
+  {
+    id: '4',
+    date: '2024-01-20',
+    type: BottleTransactionType.REFILL_DELIVERED,
+    quantity: 4,
+    orderNumber: 'ORD-12330',
+    status: 'COMPLETED',
+    description: 'Refill delivery completed',
+  },
+];
+
 const BottlesPage: React.FC = () => {
   const navigate = useNavigate();
-
-  const [inventory, setInventory] = useState<BottleInventory | null>(null);
-  const [history, setHistory] = useState<BottleActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const [inv, hist] = await Promise.all([
-          bottleService.getInventory(),
-          bottleService.getHistory({ limit: 20 }),
-        ]);
-
-        setInventory(inv);
-        // getHistory returns { transactions, total } — map to BottleActivityItem[]
-        // The shape depends on your backend; adjust if your API returns a different structure
-        setHistory(hist.transactions as unknown as BottleActivityItem[]);
-      } catch (err) {
-        console.error('Failed to load bottle data:', err);
-        setError('Could not load your bottle information. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  if (loading) {
-    return (
-      <CustomerLayout title="My Bottles">
-        <div className="space-y-6">
-          <Skeleton className="h-40 w-full rounded-xl" />
-          <Skeleton className="h-20 w-full rounded-xl" />
-          <Skeleton className="h-12 w-full rounded-xl" />
-          <Skeleton className="h-60 w-full rounded-xl" />
-        </div>
-      </CustomerLayout>
-    );
-  }
-
-  if (error || !inventory) {
-    return (
-      <CustomerLayout title="My Bottles">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error ?? 'Something went wrong.'}</AlertDescription>
-        </Alert>
-        <Button
-          variant="outline"
-          className="mt-4 w-full"
-          onClick={() => window.location.reload()}
-        >
-          Retry
-        </Button>
-      </CustomerLayout>
-    );
-  }
-
-  const totalDeposit = inventory.totalOwned * inventory.depositPerBottle;
+  
+  const totalDeposit = mockInventory.totalOwned * mockInventory.depositPerBottle;
 
   return (
     <CustomerLayout title="My Bottles">
       <div className="space-y-6">
         {/* Bottle Tracker */}
-        <BottleTracker inventory={inventory} />
+        <BottleTracker inventory={mockInventory} />
 
         {/* Deposit Info */}
         <Card className="p-4">
@@ -110,7 +99,7 @@ const BottlesPage: React.FC = () => {
               <div>
                 <p className="font-medium">Deposit on File</p>
                 <p className="text-sm text-muted-foreground">
-                  ${inventory.depositPerBottle} per bottle × {inventory.totalOwned} bottles
+                  ${mockInventory.depositPerBottle} per bottle × {mockInventory.totalOwned} bottles
                 </p>
               </div>
             </div>
@@ -142,7 +131,7 @@ const BottlesPage: React.FC = () => {
         </div>
 
         {/* Low bottles warning */}
-        {inventory.emptyBottles <= 2 && (
+        {mockInventory.emptyBottles <= 2 && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
@@ -155,9 +144,9 @@ const BottlesPage: React.FC = () => {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Bottle Activity</h3>
-            <Badge variant="secondary">{history.length} transactions</Badge>
+            <Badge variant="secondary">{mockHistory.length} transactions</Badge>
           </div>
-          <BottleHistory activities={history} />
+          <BottleHistory activities={mockHistory} />
         </div>
 
         {/* Info Card */}

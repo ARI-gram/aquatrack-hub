@@ -36,7 +36,6 @@ import {
   Wallet,
   Truck,
   Send,
-  Globe,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -129,7 +128,7 @@ const SupportPage: React.FC = () => {
       toast({ title: 'Please fill in all fields', variant: 'destructive' });
       return;
     }
-
+    
     toast({
       title: 'Ticket Submitted',
       description: 'We\'ll respond within 24 hours',
@@ -151,7 +150,6 @@ const SupportPage: React.FC = () => {
   return (
     <CustomerLayout title="Help & Support">
       <div className="space-y-6 max-w-lg mx-auto">
-
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -208,63 +206,29 @@ const SupportPage: React.FC = () => {
             </DialogContent>
           </Dialog>
 
-          <a href="tel:+254726875878">
-            <Card className="p-4 cursor-pointer hover:bg-muted/50 transition-colors h-full">
-              <div className="flex flex-col items-center text-center gap-2">
-                <div className="p-3 rounded-full bg-success/10">
-                  <Phone className="h-6 w-6 text-success" />
-                </div>
-                <span className="font-medium text-sm">Call Us</span>
+          <Card className="p-4 cursor-pointer hover:bg-muted/50 transition-colors">
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="p-3 rounded-full bg-success/10">
+                <Phone className="h-6 w-6 text-success" />
               </div>
-            </Card>
-          </a>
+              <span className="font-medium text-sm">Call Us</span>
+            </div>
+          </Card>
         </div>
 
         {/* Contact Info */}
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-            <span className="text-sm">Support hours: 8 AM – 8 PM, Mon – Sat</span>
+        <Card className="p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">Support Hours: 8 AM - 8 PM, Mon - Sat</span>
+          </div>
+          <div className="flex items-center gap-3 mb-3">
+            <Phone className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">+254 700 123 456</span>
           </div>
           <div className="flex items-center gap-3">
-            <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-            <a
-              href="tel:+254726875878"
-              className="text-sm hover:underline"
-            >
-              +254 726 875 878
-            </a>
-          </div>
-          <div className="flex items-center gap-3">
-            <MessageCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-            <a
-              href="https://wa.me/254726875878"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm hover:underline"
-            >
-              WhatsApp: 0726 875 878
-            </a>
-          </div>
-          <div className="flex items-center gap-3">
-            <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-            <a
-              href="mailto:ari.gram.technologies@gmail.com"
-              className="text-sm hover:underline"
-            >
-              ari.gram.technologies@gmail.com
-            </a>
-          </div>
-          <div className="flex items-center gap-3">
-            <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-            <a
-              href="https://ari-gram-technologies.netlify.app/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm hover:underline"
-            >
-              ari-gram-technologies.netlify.app
-            </a>
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">support@aquatrack.com</span>
           </div>
         </Card>
 
@@ -274,7 +238,7 @@ const SupportPage: React.FC = () => {
             <HelpCircle className="h-5 w-5" />
             Frequently Asked Questions
           </h3>
-
+          
           {filteredFaqs.length === 0 ? (
             <Card className="p-6 text-center">
               <p className="text-muted-foreground">No results found for "{searchQuery}"</p>
@@ -320,7 +284,6 @@ const SupportPage: React.FC = () => {
             </Button>
           </div>
         </Card>
-
       </div>
     </CustomerLayout>
   );
