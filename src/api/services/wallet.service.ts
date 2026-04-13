@@ -1,109 +1,139 @@
 /**
  * Wallet Service
  * Handles wallet operations, top-ups, and transactions
- *
- * Backend endpoints (mounted at /api/customer/wallet/):
- *   GET  /api/customer/wallet/              → WalletView
- *   POST /api/customer/wallet/topup/        → WalletTopUpView
- *   GET  /api/customer/wallet/transactions/ → WalletTransactionListView
- *   PUT  /api/customer/wallet/auto-topup/   → WalletAutoTopUpSettingsView
  */
 
 import axiosInstance from '../axios.config';
-import { CUSTOMER_API_ENDPOINTS } from '@/api/customerEndpoints';
-
-const W = CUSTOMER_API_ENDPOINTS.WALLET;
-
-// ── Types aligned to Django serializers ───────────────────────────────────────
-
-export interface CustomerWallet {
-  id:                        number;
-  current_balance:           string;
-  total_topped_up:           string;
-  total_spent:               string;
-  daily_limit:               string | null;
-  monthly_limit:             string | null;
-  auto_topup_enabled:        boolean;
-  auto_topup_threshold:      string;
-  auto_topup_amount:         string;
-  low_balance_alert_enabled: boolean;
-  low_balance_threshold:     string;
-  is_active:                 boolean;
-  is_locked:                 boolean;
-  needs_low_balance_alert:   boolean;
-  needs_auto_topup:          boolean;
-  last_transaction_date:     string | null;
-}
-
-export interface WalletTransaction {
-  id:                       number;
-  transaction_type:         'TOPUP' | 'PAYMENT' | 'REFUND' | 'ADJUSTMENT' | 'PENALTY' | 'BONUS';
-  transaction_type_display: string;
-  amount:                   string;
-  signed_amount:            string;
-  balance_before:           string;
-  balance_after:            string;
-  status:                   'PENDING' | 'COMPLETED' | 'FAILED' | 'REVERSED';
-  status_display:           string;
-  payment_method:           'CASH' | 'CARD' | 'MPESA' | 'BANK_TRANSFER' | 'SYSTEM' | null;
-  payment_reference:        string;
-  order:                    number | null;
-  description:              string;
-  created_at:               string;
-  completed_at:             string | null;
-}
-
-export interface TopUpRequest {
-  amount:             string;
-  payment_method:     'CASH' | 'CARD' | 'MPESA' | 'BANK_TRANSFER';
-  payment_reference?: string;
-}
-
-export interface WalletSettingsUpdate {
-  auto_topup_enabled?:        boolean;
-  auto_topup_threshold?:      string;
-  auto_topup_amount?:         string;
-  low_balance_alert_enabled?: boolean;
-  low_balance_threshold?:     string;
-  daily_limit?:               string | null;
-  monthly_limit?:             string | null;
-}
-
-// ── Service ───────────────────────────────────────────────────────────────────
+import { CUSTOMER_API_ENDPOINTS } from '../customerEndpoints';
+import {
+  TransactionType,
+  PaymentMethod,
+  type CustomerWallet,
+  type WalletTransaction,
+  type TopUpRequest,
+  type AutoTopUpSettings,
+} from '@/types/wallet.types';
 
 export const walletService = {
-  /** GET /api/customer/wallet/ */
+  /**
+   * Get wallet balance and details
+   */
   async getWallet(): Promise<CustomerWallet> {
-    const { data } = await axiosInstance.get<CustomerWallet>(W.GET);
-    return data;
+    const response = await axiosInstance.get<CustomerWallet>(
+      CUSTOMER_API_ENDPOINTS.WALLET.GET
+    );
+    return response.data;
   },
 
-  /** POST /api/customer/wallet/topup/ */
-  async topUp(request: TopUpRequest): Promise<WalletTransaction> {
-    const { data } = await axiosInstance.post<WalletTransaction>(W.TOPUP, request);
-    return data;
+  /**
+   * Top up wallet balance
+   */
+  async topUp(request: TopUpRequest): Promise<{
+    success: boolean;
+    transactionId: string;
+    newBalance: number;
+  }> {
+    const response = await axiosInstance.post(
+      CUSTOMER_API_ENDPOINTS.WALLET.TOPUP,
+      request
+    );
+    return response.data;
   },
 
-  /** GET /api/customer/wallet/transactions/ */
+  /**
+   * Get transaction history
+   */
   async getTransactions(params?: {
-    transaction_type?: WalletTransaction['transaction_type'];
+    page?: number;
     limit?: number;
-  }): Promise<WalletTransaction[]> {
-    const { data } = await axiosInstance.get<WalletTransaction[]>(W.TRANSACTIONS, { params });
-    return data;
+    type?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ transactions: WalletTransaction[]; total: number }> {
+    const response = await axiosInstance.get(
+      CUSTOMER_API_ENDPOINTS.WALLET.TRANSACTIONS,
+      { params }
+    );
+    return response.data;
   },
 
-  /** PUT /api/customer/wallet/auto-topup/ */
-  async updateSettings(settings: WalletSettingsUpdate): Promise<CustomerWallet> {
-    const { data } = await axiosInstance.put<CustomerWallet>(W.AUTO_TOPUP_SETTINGS, settings);
-    return data;
+  /**
+   * Update auto top-up settings
+   */
+  async updateAutoTopUp(settings: AutoTopUpSettings): Promise<AutoTopUpSettings> {
+    const response = await axiosInstance.put<AutoTopUpSettings>(
+      CUSTOMER_API_ENDPOINTS.WALLET.AUTO_TOPUP_SETTINGS,
+      settings
+    );
+    return response.data;
   },
 
-  isCredit(tx: WalletTransaction): boolean {
-    return ['TOPUP', 'REFUND', 'BONUS'].includes(tx.transaction_type);
-  },
-
-  parseSignedAmount(tx: WalletTransaction): number {
-    return parseFloat(tx.signed_amount);
+  /**
+   * Get auto top-up settings
+   */
+  async getAutoTopUpSettings(): Promise<AutoTopUpSettings | null> {
+    const response = await axiosInstance.get<AutoTopUpSettings | null>(
+      CUSTOMER_API_ENDPOINTS.WALLET.AUTO_TOPUP_SETTINGS
+    );
+    return response.data;
   },
 };
+
+// Mock data for development
+export const mockWallet: CustomerWallet = {
+  walletId: 'wallet-001',
+  customerId: 'cust-001',
+  balance: 45.00,
+  currency: 'USD',
+  autoTopUp: {
+    enabled: false,
+    threshold: 10,
+    amount: 50,
+    paymentMethod: PaymentMethod.CARD,
+  },
+  restrictions: {
+    minBalance: 0,
+    maxBalance: 1000,
+    dailySpendLimit: 500,
+  },
+  lastUpdated: new Date().toISOString(),
+};
+
+export const mockTransactions: WalletTransaction[] = [
+  {
+    transactionId: 'txn-001',
+    walletId: 'wallet-001',
+    type: TransactionType.PAYMENT,
+    amount: -11.00,
+    balanceBefore: 56.00,
+    balanceAfter: 45.00,
+    description: 'Order Payment - ORD-2024-045',
+    orderId: 'ord-045',
+    timestamp: '2024-01-30T10:30:00Z',
+    status: 'COMPLETED',
+  },
+  {
+    transactionId: 'txn-002',
+    walletId: 'wallet-001',
+    type: TransactionType.TOPUP,
+    amount: 50.00,
+    balanceBefore: 6.00,
+    balanceAfter: 56.00,
+    description: 'Wallet Top-up',
+    paymentMethod: PaymentMethod.CARD,
+    timestamp: '2024-01-28T14:00:00Z',
+    status: 'COMPLETED',
+  },
+  {
+    transactionId: 'txn-003',
+    walletId: 'wallet-001',
+    type: TransactionType.PAYMENT,
+    amount: -9.00,
+    balanceBefore: 15.00,
+    balanceAfter: 6.00,
+    description: 'Order Payment - ORD-2024-042',
+    orderId: 'ord-042',
+    timestamp: '2024-01-27T09:15:00Z',
+    status: 'COMPLETED',
+  },
+];
