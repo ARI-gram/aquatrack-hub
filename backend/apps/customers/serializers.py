@@ -223,13 +223,12 @@ class VerifyOTPSerializer(serializers.Serializer):
         # Get or create a Django User for this customer
         # Username = phone number (unique per customer)
         user, _ = User.objects.get_or_create(
-            username=customer.phone_number,
-            defaults={
-                'email': customer.email or '',
-                'first_name': (customer.full_name or '').split(' ')[0],
-                'last_name': ' '.join((customer.full_name or '').split(' ')[1:]),
-            }
+            username=f"customer_{customer.id}",
         )
+        user.email = customer.email or ''
+        user.first_name = (customer.full_name or '').split(' ')[0]
+        user.last_name = ' '.join((customer.full_name or '').split(' ')[1:])
+        user.save(update_fields=['email', 'first_name', 'last_name'])
 
         # Generate a proper token tied to the Django User
         refresh = RefreshToken.for_user(user)
