@@ -94,16 +94,18 @@ const CustomerLoginPage: React.FC = () => {
 
       const nameParts = (data.customer.full_name ?? '').trim().split(/\s+/);
       const customerUser = {
-        id:        data.customer.id,
-        email:     data.customer.email ?? '',
-        firstName: nameParts[0] ?? '',
-        lastName:  nameParts.slice(1).join(' '),
-        role:      'customer' as const,
-        phone:     data.customer.phone_number,
-        fullName:  data.customer.full_name,
-        clientId:  data.customer.client ?? null,
-        createdAt: data.customer.created_at ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        id:                    data.customer.id,
+        email:                 data.customer.email ?? '',
+        firstName:             nameParts[0] ?? '',
+        lastName:              nameParts.slice(1).join(' '),
+        role:                  'customer' as const,
+        phone:                 data.customer.phone_number,
+        fullName:              data.customer.full_name,
+        clientId:              data.customer.client ?? null,
+        createdAt:             data.customer.created_at ?? new Date().toISOString(),
+        updatedAt:             new Date().toISOString(),
+        must_change_password:  false,
+        password_changed_at:   null,
       };
 
       localStorage.setItem('customer_data', JSON.stringify(data.customer));
