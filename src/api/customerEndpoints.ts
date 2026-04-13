@@ -1,11 +1,16 @@
 /**
  * Customer API Endpoints
- * Matches /apps/customers/urls.py exactly
+ * Matches actual Django urls.py registrations exactly:
+ *
+ *   api/customer/   → apps/customers/urls.py   (customer self-service)
+ *   api/wallet/     → apps/wallet/urls.py
+ *   api/bottles/    → apps/bottles/urls.py
+ *   api/orders/     → apps/orders/urls.py      (shared, used by customer too)
  */
-// /src/api/customerEndpoints.ts
 
 export const CUSTOMER_API_ENDPOINTS = {
-  // Customer Authentication
+  // ── Authentication ────────────────────────────────────────────────────────
+  // Mounted at api/customer/ via apps/customers/urls.py
   AUTH: {
     REGISTER:      '/customer/auth/register/',
     LOGIN:         '/customer/auth/verify-otp/',
@@ -15,7 +20,8 @@ export const CUSTOMER_API_ENDPOINTS = {
     REFRESH_TOKEN: '/auth/refresh-token/',
   },
 
-  // Customer Profile
+  // ── Customer Profile ──────────────────────────────────────────────────────
+  // Mounted at api/customer/ via apps/customers/urls.py
   PROFILE: {
     GET:             '/customer/profile/',
     UPDATE:          '/customer/profile/',
@@ -25,16 +31,19 @@ export const CUSTOMER_API_ENDPOINTS = {
     PAYMENT_PROFILE: '/customer/payment-profile/',
   },
 
-  // Bottle Management
+  // ── Bottle Management ─────────────────────────────────────────────────────
+  // Mounted at api/bottles/ via apps/bottles/urls.py
+  // NOTE: was wrongly pointing to /customer/bottles/ — that route does not exist
   BOTTLES: {
-    INVENTORY:        '/customer/bottles/inventory/',
-    HISTORY:          '/customer/bottles/history/',
-    PURCHASE:         '/customer/bottles/purchase/',
-    DEPOSIT_INFO:     '/customer/bottles/deposit-info/',
-    CONFIRM_EXCHANGE: (orderId: string) => `/customer/bottles/exchange/${orderId}/confirm/`,
+    INVENTORY:        '/bottles/inventory',
+    HISTORY:          '/bottles/transactions',
+    PURCHASE:         '/bottles/purchase',           // not yet implemented on backend
+    DEPOSIT_INFO:     '/bottles/deposit-info',       // not yet implemented on backend
+    CONFIRM_EXCHANGE: (orderId: string) => `/bottles/${orderId}/confirm-exchange`,
   },
 
-  // Customer Orders
+  // ── Customer Orders ───────────────────────────────────────────────────────
+  // Mounted at api/customer/ via apps/customers/urls.py
   ORDERS: {
     LIST:             '/customer/orders/',
     CREATE:           '/customer/orders/create/',
@@ -43,19 +52,21 @@ export const CUSTOMER_API_ENDPOINTS = {
     TRACK:            (id: string) => `/customer/orders/${id}/track/`,
     ACTIVE:           '/customer/orders/?status=IN_TRANSIT',
     CONFIRM_DELIVERY: (id: string) => `/customer/orders/${id}/confirm-delivery/`,
-    // Re-send invoice to the customer for credit orders
     REQUEST_INVOICE:  (id: string) => `/customer/orders/${id}/request-invoice/`,
   },
 
-  // Wallet
+  // ── Wallet ────────────────────────────────────────────────────────────────
+  // Mounted at api/wallet/ via apps/wallet/urls.py
+  // NOTE: was wrongly pointing to /customer/wallet/ — that route does not exist
   WALLET: {
-    GET:                 '/customer/wallet/',
-    TOPUP:               '/customer/wallet/topup/',
-    TRANSACTIONS:        '/customer/wallet/transactions/',
-    AUTO_TOPUP_SETTINGS: '/customer/wallet/auto-topup/',
+    GET:                 '/wallet/',
+    TOPUP:               '/wallet/topup',
+    TRANSACTIONS:        '/wallet/transactions',
+    AUTO_TOPUP_SETTINGS: '/wallet/',               // same WalletView, use PUT
   },
 
-  // Notifications
+  // ── Notifications ─────────────────────────────────────────────────────────
+  // Mounted at api/customer/notifications/ via customer_notification_urls
   NOTIFICATIONS: {
     LIST:          '/customer/notifications/',
     MARK_READ:     (id: string) => `/customer/notifications/${id}/read/`,
@@ -64,26 +75,28 @@ export const CUSTOMER_API_ENDPOINTS = {
     UNREAD_COUNT:  '/customer/notifications/unread-count/',
   },
 
-  // Support
+  // ── Support ───────────────────────────────────────────────────────────────
   SUPPORT: {
     CREATE_TICKET: '/customer/support/ticket/',
     TICKETS:       '/customer/support/tickets/',
     FAQ:           '/customer/support/faq/',
   },
 
-  // Pricing (public)
+  // ── Pricing ───────────────────────────────────────────────────────────────
   PRICING: {
     GET:        '/pricing/',
     TIME_SLOTS: '/pricing/time-slots/',
   },
 
-  // Credit account (credit/cheque customers only)
+  // ── Credit account ────────────────────────────────────────────────────────
+  // Mounted at api/customer/ via apps/customers/urls.py
   CREDIT: {
     STATUS:        '/customer/credit/status/',
     GRACE_REQUEST: '/customer/credit/grace-request/',
   },
 
-  // Product catalogue for the order page
+  // ── Product catalogue ─────────────────────────────────────────────────────
+  // Mounted at api/customer/ via apps/customers/urls.py
   PRODUCTS: {
     LIST: '/customer/products/',
   },
