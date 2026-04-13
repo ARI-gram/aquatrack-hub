@@ -170,4 +170,3 @@ const BottlesPage: React.FC = () => {
 };
 
 export default BottlesPage;
-
