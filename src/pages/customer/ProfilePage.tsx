@@ -3,15 +3,19 @@
  * View and edit customer profile information
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CustomerLayout } from '@/components/layout/CustomerLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { customerAdminService, type AdminCustomer } from '@/api/services/customerAdmin.service';
+import { bottleService } from '@/api/services/bottle.service';
+import { type BottleInventory } from '@/types/bottle.types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   User,
   Mail,
@@ -24,25 +28,82 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { format } from 'date-fns';
 
 const ProfilePage: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
     email: user?.email || '',
-    phone: '+254 712 345 678',
   });
 
+  const [customer, setCustomer] = useState<AdminCustomer | null>(null);
+  const [inventory, setInventory] = useState<BottleInventory | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchStats = async () => {
+      try {
+        setStatsLoading(true);
+        const [cust, inv] = await Promise.all([
+          customerAdminService.getCustomer(user.id),
+          bottleService.getInventory(),
+        ]);
+        setCustomer(cust);
+        setInventory(inv);
+      } catch (err) {
+        console.error('Failed to load profile stats:', err);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, [user?.id]);
+
+  // Keep form in sync with auth user in case it updates externally
+  useEffect(() => {
+    setFormData({
+      firstName: user?.firstName || '',
+      lastName: user?.lastName || '',
+      email: user?.email || '',
+    });
+  }, [user]);
+
   const handleSave = () => {
+    // TODO: wire to a PATCH /customers/{id}/ call when the customer-facing
+    // profile update endpoint is available. For now, optimistically update UI.
     toast({
       title: 'Profile Updated',
       description: 'Your changes have been saved successfully',
     });
     setIsEditing(false);
   };
+
+  const memberSince = customer?.created_at
+    ? format(new Date(customer.created_at), 'MMMM yyyy')
+    : null;
+
+  const walletBalance = customer?.wallet_balance
+    ? parseFloat(customer.wallet_balance).toLocaleString('en-KE', {
+        minimumFractionDigits: 2,
+      })
+    : null;
+
+  const depositOnFile = inventory
+    ? (inventory.totalOwned * inventory.depositPerBottle).toLocaleString('en-KE', {
+        minimumFractionDigits: 2,
+      })
+    : null;
+
+  const customerTypeLabel =
+    customer?.customer_type_display ?? customer?.customer_type ?? 'Customer';
 
   return (
     <CustomerLayout title="My Profile">
@@ -71,12 +132,14 @@ const ProfilePage: React.FC = () => {
             <div className="flex items-center gap-2 mt-2">
               <Badge variant="secondary" className="gap-1">
                 <RefreshCw className="h-3 w-3" />
-                Refill Customer
+                {customerTypeLabel}
               </Badge>
-              <Badge variant="outline" className="gap-1 text-success border-success/30">
-                <Shield className="h-3 w-3" />
-                Verified
-              </Badge>
+              {customer?.is_phone_verified && (
+                <Badge variant="outline" className="gap-1 text-success border-success/30">
+                  <Shield className="h-3 w-3" />
+                  Verified
+                </Badge>
+              )}
             </div>
           </div>
         </Card>
@@ -92,7 +155,18 @@ const ProfilePage: React.FC = () => {
               </Button>
             ) : (
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      firstName: user?.firstName || '',
+                      lastName: user?.lastName || '',
+                      email: user?.email || '',
+                    });
+                    setIsEditing(false);
+                  }}
+                >
                   <X className="h-4 w-4 mr-1" />
                   Cancel
                 </Button>
@@ -151,7 +225,7 @@ const ProfilePage: React.FC = () => {
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="phone"
-                  value={formData.phone}
+                  value={customer?.phone_number ?? '—'}
                   className="pl-10"
                   disabled
                 />
@@ -166,33 +240,51 @@ const ProfilePage: React.FC = () => {
         {/* Account Stats */}
         <Card className="p-6">
           <h3 className="font-semibold mb-4">Account Summary</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 rounded-lg bg-muted/50">
-              <p className="text-2xl font-bold text-primary">24</p>
-              <p className="text-sm text-muted-foreground">Total Orders</p>
+          {statsLoading ? (
+            <div className="grid grid-cols-2 gap-4">
+              {[...Array(4)].map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-lg" />
+              ))}
             </div>
-            <div className="p-4 rounded-lg bg-muted/50">
-              <p className="text-2xl font-bold text-success">10</p>
-              <p className="text-sm text-muted-foreground">Bottles Owned</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 rounded-lg bg-muted/50">
+                <p className="text-2xl font-bold text-primary">
+                  {customer?.total_orders ?? '—'}
+                </p>
+                <p className="text-sm text-muted-foreground">Total Orders</p>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/50">
+                <p className="text-2xl font-bold text-success">
+                  {inventory?.totalOwned ?? '—'}
+                </p>
+                <p className="text-sm text-muted-foreground">Bottles Owned</p>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/50">
+                <p className="text-2xl font-bold">
+                  {walletBalance != null ? `KES ${walletBalance}` : '—'}
+                </p>
+                <p className="text-sm text-muted-foreground">Wallet Balance</p>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/50">
+                <p className="text-2xl font-bold">
+                  {depositOnFile != null ? `KES ${depositOnFile}` : '—'}
+                </p>
+                <p className="text-sm text-muted-foreground">Deposit on File</p>
+              </div>
             </div>
-            <div className="p-4 rounded-lg bg-muted/50">
-              <p className="text-2xl font-bold">$125</p>
-              <p className="text-sm text-muted-foreground">Wallet Balance</p>
-            </div>
-            <div className="p-4 rounded-lg bg-muted/50">
-              <p className="text-2xl font-bold">$100</p>
-              <p className="text-sm text-muted-foreground">Deposit on File</p>
-            </div>
-          </div>
+          )}
         </Card>
 
         {/* Member Since */}
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Member since</span>
-            <span className="font-medium">January 2024</span>
-          </div>
-        </Card>
+        {memberSince && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Member since</span>
+              <span className="font-medium">{memberSince}</span>
+            </div>
+          </Card>
+        )}
       </div>
     </CustomerLayout>
   );
