@@ -26,12 +26,13 @@ export const CUSTOMER_API_ENDPOINTS = {
   },
 
   // Bottle Management
+  // Backend mounted at /api/bottles/
   BOTTLES: {
-    INVENTORY:        '/customer/bottles/inventory/',
-    HISTORY:          '/customer/bottles/history/',
-    PURCHASE:         '/customer/bottles/purchase/',
-    DEPOSIT_INFO:     '/customer/bottles/deposit-info/',
-    CONFIRM_EXCHANGE: (orderId: string) => `/customer/bottles/exchange/${orderId}/confirm/`,
+    INVENTORY:        '/bottles/inventory',
+    HISTORY:          '/bottles/transactions',
+    PURCHASE:         '/bottles/purchase',
+    DEPOSIT_INFO:     '/bottles/deposit-info',
+    CONFIRM_EXCHANGE: (orderId: string) => `/bottles/${orderId}/confirm-exchange`,
   },
 
   // Customer Orders
@@ -43,16 +44,16 @@ export const CUSTOMER_API_ENDPOINTS = {
     TRACK:            (id: string) => `/customer/orders/${id}/track/`,
     ACTIVE:           '/customer/orders/?status=IN_TRANSIT',
     CONFIRM_DELIVERY: (id: string) => `/customer/orders/${id}/confirm-delivery/`,
-    // Re-send invoice to the customer for credit orders
     REQUEST_INVOICE:  (id: string) => `/customer/orders/${id}/request-invoice/`,
   },
 
   // Wallet
+  // Backend mounted at /api/wallet/
   WALLET: {
-    GET:                 '/customer/wallet/',
-    TOPUP:               '/customer/wallet/topup/',
-    TRANSACTIONS:        '/customer/wallet/transactions/',
-    AUTO_TOPUP_SETTINGS: '/customer/wallet/auto-topup/',
+    GET:                 '/wallet/',
+    TOPUP:               '/wallet/topup',
+    TRANSACTIONS:        '/wallet/transactions',
+    AUTO_TOPUP_SETTINGS: '/wallet/auto-topup',
   },
 
   // Notifications
