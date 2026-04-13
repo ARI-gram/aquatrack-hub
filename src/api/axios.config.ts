@@ -20,6 +20,25 @@ const isPublicEndpoint = (url: string | undefined): boolean => {
   return PUBLIC_ENDPOINTS.some((path) => url.includes(path));
 };
 
+// ─── Refresh queue ────────────────────────────────────────────────────────────
+// Prevents the race condition where multiple simultaneous 401s each try to
+// refresh independently, causing the second refresh to fail on a rotated token.
+// Instead: the first 401 triggers the refresh; all others wait in this queue
+// and are resolved/rejected once the single refresh attempt completes.
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+}> = [];
+
+const processQueue = (error: unknown, token: string | null = null) => {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else resolve(token!);
+  });
+  failedQueue = [];
+};
+
 // ─── Read role BEFORE any clearing ───────────────────────────────────────────
 const getStoredRole = (): string | null => {
   try {
@@ -40,10 +59,6 @@ const clearSession = () => {
 };
 
 // ─── Soft logout via custom event ────────────────────────────────────────────
-// Instead of window.location.href (hard reload that wipes React state and
-// causes the "logged in → dashboard → back to login" flash), we dispatch
-// a custom event that AuthContext listens to and handles with React Router.
-// This keeps the React tree alive and lets the router do a clean navigation.
 const dispatchSessionExpired = (isCustomer: boolean) => {
   window.dispatchEvent(
     new CustomEvent('aquatrack:session-expired', {
@@ -73,45 +88,64 @@ axiosInstance.interceptors.response.use(
       _retry?: boolean;
     };
 
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      const refreshToken = localStorage.getItem('aquatrack_refresh_token');
-
-      if (refreshToken) {
-        // Read role BEFORE clearing anything
-        const role       = getStoredRole();
-        const isCustomer = role === 'customer';
-
-        try {
-          const refreshUrl = `${import.meta.env.VITE_API_BASE_URL || '/api'}/auth/refresh-token/`;
-
-          const response = await axios.post(refreshUrl, { refresh: refreshToken });
-          const { access } = response.data;
-          localStorage.setItem('aquatrack_token', access);
-
-          if (originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${access}`;
-          }
-          return axiosInstance(originalRequest);
-        } catch {
-          // Refresh failed — clear then navigate softly (no hard reload)
-          clearSession();
-          dispatchSessionExpired(isCustomer);
-        }
-      } else {
-        // No refresh token
-        const role       = getStoredRole();
-        const isCustomer = role === 'customer';
-        clearSession();
-        dispatchSessionExpired(isCustomer);
-      }
+    if (error.response?.status !== 401 || !originalRequest || originalRequest._retry) {
+      if (error.response?.status === 403) console.error('Access forbidden');
+      else if (error.response?.status === 500) console.error('Server error');
+      return Promise.reject(error);
     }
 
-    if (error.response?.status === 403) console.error('Access forbidden');
-    else if (error.response?.status === 500) console.error('Server error');
+    // ── If a refresh is already in flight, queue this request ────────────────
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then((token) => {
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+        }
+        return axiosInstance(originalRequest);
+      });
+    }
 
-    return Promise.reject(error);
+    // ── First 401: attempt the token refresh ─────────────────────────────────
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    const refreshToken = localStorage.getItem('aquatrack_refresh_token');
+    const role         = getStoredRole();
+    const isCustomer   = role === 'customer';
+
+    if (!refreshToken) {
+      isRefreshing = false;
+      processQueue(error, null);
+      clearSession();
+      dispatchSessionExpired(isCustomer);
+      return Promise.reject(error);
+    }
+
+    try {
+      const refreshUrl = `${import.meta.env.VITE_API_BASE_URL || '/api'}/auth/refresh-token/`;
+      const response   = await axios.post(refreshUrl, { refresh: refreshToken });
+      const { access } = response.data;
+
+      localStorage.setItem('aquatrack_token', access);
+
+      if (originalRequest.headers) {
+        originalRequest.headers.Authorization = `Bearer ${access}`;
+      }
+
+      // Let all queued requests through with the new token
+      processQueue(null, access);
+
+      return axiosInstance(originalRequest);
+    } catch (refreshError) {
+      // Refresh failed — reject queued requests and log out
+      processQueue(refreshError, null);
+      clearSession();
+      dispatchSessionExpired(isCustomer);
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
   },
 );
 
