@@ -39,9 +39,9 @@ urlpatterns = [
     # Stock entries (receive / top-up inventory)
     path('api/stock/',     include('apps.products.stock_urls')),
 
-    path('api/bottles/',   include('apps.bottles.urls')),
+    path('api/customer/bottles/', include('apps.bottles.urls')),
     path('api/orders/',    include('apps.orders.urls')),
-    path('api/wallet/',    include('apps.wallet.urls')),
+    path('api/customer/wallet/',  include('apps.wallet.urls')),
 
     # Invoices (auto-generated on order completion)
     path('api/invoices/',  include('apps.invoices.urls')),
