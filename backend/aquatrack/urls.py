@@ -13,8 +13,17 @@ from apps.notifications.urls import (
     client_notification_urls,
 )
 
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+
+    # ── API Schema & Docs ──
+    path('api/schema/',          SpectacularAPIView.as_view(),        name='schema'),
+    path('api/schema/swagger/',
+         SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/schema/redoc/',
+         SpectacularRedocView.as_view(url_name='schema'),   name='redoc'),
 
     path('api/auth/',      include('apps.authentication.urls')),
     path('api/billing/',   include('apps.billing.urls')),
@@ -25,47 +34,21 @@ urlpatterns = [
     path('api/driver/notifications/',   include(driver_notification_urls)),
     path('api/client/notifications/',   include(client_notification_urls)),
 
-    # Customer self-service (OTP login, profile, addresses, products)
     path('api/customer/',  include('apps.customers.urls')),
-
-    # Client-admin customer management
     path('api/customers/', include('apps.customers.admin_urls')),
-
-    # Product catalogue (admin CRUD)
     path('api/products/',  include('apps.products.urls')),
-
-    # Stock entries (receive / top-up inventory)
     path('api/stock/',     include('apps.products.stock_urls')),
-
     path('api/bottles/',   include('apps.bottles.urls')),
     path('api/orders/',    include('apps.orders.urls')),
     path('api/wallet/',    include('apps.wallet.urls')),
-
-    # Invoices (auto-generated on order completion)
     path('api/invoices/',  include('apps.invoices.urls')),
-
-    # Driver app        →  /api/driver/deliveries/  /api/driver/profile/
     path('api/driver/',    include('apps.deliveries.driver_urls')),
-
-    # Client dashboard  →  /api/client/deliveries/  /api/client/orders/assign/
     path('api/client/',    include('apps.deliveries.client_urls')),
-
-    # Public tracking   →  /api/track/<order_number>/
     path('api/track/',     include('apps.deliveries.tracking_urls')),
-
-    # Misc utilities    →  /api/deliveries/health/
     path('api/deliveries/', include('apps.deliveries.urls')),
-
-    # Store management  →  /api/store/products/  /api/store/movements/
     path('api/store/',     include('apps.products.store_urls')),
-
-    # Client account management (profile, addresses, payment methods)
     path('api/client/', include('apps.accounts.urls')),
-
-    # Reports  →  /api/reports/revenue/  /api/reports/vat/  /api/reports/outstanding/
     path('api/reports/', include('apps.reports.urls')),
-
-    # Site manager      →  /api/manager/drivers/
     path('api/manager/',    include('apps.deliveries.manager_urls')),
 ]
 

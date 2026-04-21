@@ -13,13 +13,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { toast } from 'sonner';
+import { DriverSaleReceiptModal } from '@/pages/driver/DriverSaleReceiptModal';
+import type { DriverSaleData }    from '@/pages/driver/DriverSaleReceiptModal';
 import {
   Loader2, Search, X, RefreshCw, Calendar,
   ShoppingBag, Truck, Store, TrendingUp,
   ChevronDown, Phone, User,
   Package, BarChart3, InboxIcon,
   Filter, ArrowUpDown, Download,
-  CreditCard, Banknote, Wallet,
+  CreditCard, Banknote, Wallet, Receipt,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AccountsLayout } from '@/pages/accounts/AccountsLayout';
@@ -257,12 +259,73 @@ const CustomerCell: React.FC<{ tx: DirectSaleRow }> = ({ tx }) => {
     </div>
   );
 };
+const MobileCard: React.FC<{ tx: DirectSaleRow; onReceipt: (tx: DirectSaleRow) => void }> = ({ tx, onReceipt }) => {
+  const srcCfg  = SOURCE_CFG[tx.source];
+  const SrcIcon = srcCfg.icon;
+  const pm      = resolvePaymentMethod(tx);
+  const { name: custName, phone: custPhone, isWalkIn } = resolveCustomer(tx);
 
+  return (
+    <div className="border-b border-border/20 px-4 py-4 hover:bg-muted/10 transition-colors">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <p className="font-bold text-sm">{tx.productName}</p>
+            <div className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-bold border', srcCfg.bg)}>
+              <SrcIcon className={cn('h-2.5 w-2.5', srcCfg.color)} />
+              <span className={srcCfg.color}>{srcCfg.label}</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">{fmtDate(tx.date)} · {fmtTime(tx.date)}</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="font-black text-base tabular-nums font-mono">{fmt(tx.totalAmount)}</p>
+          <p className="text-[10px] text-muted-foreground font-mono">{tx.quantity} × {fmt(tx.unitPrice)}</p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 text-[11px]">
+          {tx.servedBy && (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <div className="h-4 w-4 rounded-full bg-muted flex items-center justify-center text-[8px] font-black">
+                {tx.servedBy[0]?.toUpperCase()}
+              </div>
+              <span className="truncate max-w-[80px]">{tx.servedBy}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-1 text-muted-foreground">
+            {isWalkIn
+              ? <span className="italic">Walk-in</span>
+              : <span className="truncate max-w-[80px] font-medium text-foreground">{custName}</span>
+            }
+          </div>
+          {custPhone && (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Phone className="h-2.5 w-2.5" />
+              <span>{custPhone}</span>
+            </div>
+          )}
+        </div>
+        <PaymentBadge method={pm} />
+      </div>
+      {tx.notes && (
+        <p className="text-[11px] text-muted-foreground italic mt-2 pl-2 border-l-2 border-border">{tx.notes}</p>
+      )}
+      <button
+        onClick={() => onReceipt(tx)}
+        className="mt-3 w-full flex items-center justify-center gap-2 h-10 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300 transition-colors active:scale-[0.98]"
+      >
+        <Receipt className="h-3.5 w-3.5" />
+        Issue Receipt
+      </button>
+    </div>
+  );
+};
 // ─────────────────────────────────────────────────────────────────────────────
 // Transaction row
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TxRow: React.FC<{ tx: DirectSaleRow; index: number }> = ({ tx, index }) => {
+const TxRow: React.FC<{ tx: DirectSaleRow; index: number; onReceipt: (tx: DirectSaleRow) => void }> = ({ tx, index, onReceipt }) => {
   const [expanded, setExpanded] = useState(false);
   const srcCfg  = SOURCE_CFG[tx.source];
   const SrcIcon = srcCfg.icon;
@@ -343,6 +406,16 @@ const TxRow: React.FC<{ tx: DirectSaleRow; index: number }> = ({ tx, index }) =>
             expanded && 'rotate-180 text-muted-foreground',
           )} />
         </td>
+        {/* Receipt button */}
+        <td className="px-3 py-3">
+          <button
+            onClick={e => { e.stopPropagation(); onReceipt(tx); }}
+            className="h-8 px-2 flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300 transition-colors active:scale-[0.98]"
+            title="View Receipt"
+          >
+            <Receipt className="h-3.5 w-3.5" />
+          </button>
+        </td>
       </tr>
 
       {/* Desktop expanded notes */}
@@ -356,57 +429,6 @@ const TxRow: React.FC<{ tx: DirectSaleRow; index: number }> = ({ tx, index }) =>
           </td>
         </tr>
       )}
-
-      {/* Mobile card */}
-      <div className="md:hidden border-b border-border/20 px-4 py-4 hover:bg-muted/10 transition-colors">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <p className="font-bold text-sm">{tx.productName}</p>
-              <div className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] font-bold border', srcCfg.bg)}>
-                <SrcIcon className={cn('h-2.5 w-2.5', srcCfg.color)} />
-                <span className={srcCfg.color}>{srcCfg.label}</span>
-              </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground">{fmtDate(tx.date)} · {fmtTime(tx.date)}</p>
-          </div>
-          <div className="text-right shrink-0">
-            <p className="font-black text-base tabular-nums font-mono">{fmt(tx.totalAmount)}</p>
-            <p className="text-[10px] text-muted-foreground font-mono">{tx.quantity} × {fmt(tx.unitPrice)}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-[11px]">
-            {tx.servedBy && (
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <div className="h-4 w-4 rounded-full bg-muted flex items-center justify-center text-[8px] font-black">
-                  {tx.servedBy[0]?.toUpperCase()}
-                </div>
-                <span className="truncate max-w-[80px]">{tx.servedBy}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-1 text-muted-foreground">
-              {isWalkIn ? (
-                <span className="italic">Walk-in</span>
-              ) : (
-                <span className="truncate max-w-[80px] font-medium text-foreground">{custName}</span>
-              )}
-            </div>
-            {custPhone && (
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Phone className="h-2.5 w-2.5" />
-                <span>{custPhone}</span>
-              </div>
-            )}
-          </div>
-          <PaymentBadge method={pm} />
-        </div>
-
-        {tx.notes && (
-          <p className="text-[11px] text-muted-foreground italic mt-2 pl-2 border-l-2 border-border">{tx.notes}</p>
-        )}
-      </div>
     </>
   );
 };
@@ -418,6 +440,8 @@ const TxRow: React.FC<{ tx: DirectSaleRow; index: number }> = ({ tx, index }) =>
 type SourceFilter = 'all' | 'store' | 'driver';
 
 const AccountingDirectSalesPage: React.FC = () => {
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<DriverSaleData | null>(null);
   const [data,         setData]         = useState<DirectSalesResponse | null>(null);
   const [loading,      setLoading]      = useState(true);
   const [search,       setSearch]       = useState('');
@@ -425,6 +449,25 @@ const AccountingDirectSalesPage: React.FC = () => {
   const [monthFilter,  setMonthFilter]  = useState<string>('');
   const [page,         setPage]         = useState(1);
   const [filtersOpen,  setFiltersOpen]  = useState(false);
+
+  const handleReceipt = (tx: DirectSaleRow) => {
+    const { name: custName, phone } = resolveCustomer(tx);
+    const data: DriverSaleData = {
+      productName:   tx.productName,
+      productUnit:   tx.productType === 'bottle' ? 'BOTTLES' : 'UNITS',
+      isReturnable:  tx.productType === 'bottle',
+      quantity:      tx.quantity,
+      unitPrice:     tx.unitPrice,
+      customerName:  custName || 'Walk-in Customer',
+      customerPhone: phone || undefined,
+      isWalkIn:      !custName,
+      paymentMethod: resolvePaymentMethod(tx),
+      servedBy:      tx.servedBy || 'Staff',
+      date:          tx.date,
+    };
+    setReceiptSale(data);
+    setReceiptOpen(true);
+  };
 
   const months = useMemo(() => recentMonths(12), []);
 
@@ -883,7 +926,7 @@ const AccountingDirectSalesPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((tx, i) => <TxRow key={tx.id} tx={tx} index={i} />)}
+                    {filtered.map((tx, i) => <TxRow key={tx.id} tx={tx} index={i} onReceipt={handleReceipt} />)}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/20">
@@ -904,7 +947,7 @@ const AccountingDirectSalesPage: React.FC = () => {
 
               {/* Mobile */}
               <div className="md:hidden divide-y divide-border/20">
-                {filtered.map((tx, i) => <TxRow key={tx.id} tx={tx} index={i} />)}
+                {filtered.map((tx, i) => <MobileCard key={tx.id} tx={tx} onReceipt={handleReceipt} />)}
                 {/* Mobile footer total */}
                 <div className="px-4 py-3 bg-muted/20 flex items-center justify-between">
                   <span className="text-xs font-black uppercase tracking-wide text-muted-foreground">
@@ -962,6 +1005,13 @@ const AccountingDirectSalesPage: React.FC = () => {
         )}
 
       </div>
+      {receiptSale && (
+        <DriverSaleReceiptModal
+          open={receiptOpen}
+          onClose={() => { setReceiptOpen(false); setReceiptSale(null); }}
+          sale={receiptSale}
+        />
+      )}
     </AccountsLayout>
   );
 };

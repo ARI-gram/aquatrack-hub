@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'drf_spectacular',
     'anymail',
 
     # Third-party apps
@@ -96,6 +97,7 @@ DATABASES = {
         'CONN_HEALTH_CHECKS': True,
         'OPTIONS': {
             'sslmode': 'require',
+            # 'sslmode': 'disable',
         },
     }
 }
@@ -184,6 +186,8 @@ FRONTEND_URL = _frontend_url
 # Django REST Framework
 # ---------------------------------------------------------------
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',  # ← add this line
+
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
@@ -202,7 +206,6 @@ REST_FRAMEWORK = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
-
 # ---------------------------------------------------------------
 # Simple JWT Settings
 # ---------------------------------------------------------------

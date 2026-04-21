@@ -67,15 +67,15 @@ const clientAdminNav: NavItem[] = [
   { label: 'Dashboard',    path: ROUTES.CLIENT_ADMIN.DASHBOARD,  icon: LayoutDashboard },
   { label: 'Orders',       path: ROUTES.CLIENT_ADMIN.ORDERS,     icon: ClipboardList   },
   { label: 'Deliveries',   path: ROUTES.CLIENT_ADMIN.DELIVERIES, icon: Truck           },
-  { label: 'Direct Sales', path: '/client/direct-sales',         icon: ShoppingBag     },
-  { label: 'Store',        path: ROUTES.CLIENT_ADMIN.STORE,      icon: Store           },
   { label: 'Customers',    path: ROUTES.CLIENT_ADMIN.CUSTOMERS,  icon: Users           },
+  { label: 'Store',        path: ROUTES.CLIENT_ADMIN.STORE,      icon: Store           },  
   { label: 'Products',     path: ROUTES.CLIENT_ADMIN.PRODUCTS,   icon: Package         },
   { label: 'Employees',    path: ROUTES.CLIENT_ADMIN.EMPLOYEES,  icon: UserCog         },
   { label: 'Settings',     path: ROUTES.CLIENT_ADMIN.SETTINGS,   icon: Settings        },
   { label: 'Reports',      path: ROUTES.CLIENT_ADMIN.REPORTS,    icon: TrendingUp      },
-  { label: 'Accounts',     path: '/client/accounts/settings',    icon: BookOpen        },
   { label: 'Invoices',     path: '/client/accounts/invoices',    icon: FileText        },
+  { label: 'Direct Sales', path: '/client/direct-sales',         icon: ShoppingBag     },
+
 ];
 
 const accountantNav: NavItem[] = [

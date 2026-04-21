@@ -34,6 +34,7 @@ import {
   UserCog, Truck, Plus, Check, UserCheck,
   ChevronRight, ImageOff, Minus, RotateCcw,
   AlertTriangle, CheckCircle2,
+  Receipt,
 } from 'lucide-react';
 import { driverStoreService }                          from '@/api/services/driver-store.service';
 import { bottleStoreService, consumableStoreService }  from '@/api/services/store.service';
@@ -269,7 +270,7 @@ function soldBy(sale: DirectSale): string {
 // Desktop table row
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven }) => {
+const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean; onReceipt: (s: DirectSale) => void }> = ({ sale, isEven, onReceipt }) => {
   const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
   const seller = soldBy(sale);
 
@@ -349,6 +350,15 @@ const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven
           )}
         </div>
       </td>
+      <td className="px-3 py-3.5">
+        <button
+          onClick={() => onReceipt(sale)}
+          className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300 transition-colors active:scale-[0.98] whitespace-nowrap"
+        >
+          <Receipt className="h-3 w-3" />
+          Receipt
+        </button>
+      </td>
     </tr>
   );
 };
@@ -357,7 +367,7 @@ const SaleRow: React.FC<{ sale: DirectSale; isEven: boolean }> = ({ sale, isEven
 // Mobile card
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
+const SaleCard: React.FC<{ sale: DirectSale; onReceipt: (s: DirectSale) => void }> = ({ sale, onReceipt }) => {
   const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
   const seller = soldBy(sale);
 
@@ -426,6 +436,13 @@ const SaleCard: React.FC<{ sale: DirectSale }> = ({ sale }) => {
               Account
             </span>
           )}
+          <button
+            onClick={() => onReceipt(sale)}
+            className="mt-3 w-full flex items-center justify-center gap-2 h-10 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300 transition-colors active:scale-[0.98]"
+          >
+            <Receipt className="h-3.5 w-3.5" />
+            Issue Receipt
+          </button>
         </div>
       </div>
     </div>
@@ -702,6 +719,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({ open, mode, product
   const [customerProfile,  setCustomerProfile]  = useState<AdminCustomer | null>(null);
   const [profileLoading,   setProfileLoading]   = useState(false);
   const [paymentMethod,    setPaymentMethod]    = useState<DirectSalePM | ''>('');
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<DriverSaleData | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -710,6 +729,26 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({ open, mode, product
       setNotes(''); setCustomerProfile(null); setProfileLoading(false); setPaymentMethod('');
     }
   }, [open]);
+
+  const handleReceipt = (sale: DirectSale) => {
+    const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
+    const pmMatch = (sale.notes ?? '').match(/Payment:\s*(\w+)/i);
+    const data: DriverSaleData = {
+      productName:   sale.product_name,
+      productUnit:   'UNITS',
+      isReturnable:  sale.product_type === 'bottle',
+      quantity:      sale.quantity,
+      unitPrice:     0, // not stored on DirectSale history
+      customerName:  sale.customer_name || custName || 'Walk-in Customer',
+      customerPhone: phone || undefined,
+      isWalkIn:      !isAccount,
+      paymentMethod: pmMatch?.[1] ?? 'CASH',
+      servedBy:      soldBy(sale),
+      date:          sale.movement_date,
+    };
+    setReceiptSale(data);
+    setReceiptOpen(true);
+  };
 
   const handleSelectCustomer = async (c: CustomerResult) => {
     setSelectedCustomer(c); setCustomerName(c.name); setIsWalkIn(false); setStep('sale');
@@ -1061,6 +1100,8 @@ const DirectSaleDialog: React.FC<DirectSaleDialogProps> = ({ open, mode, product
 type SourceFilter = 'all' | 'driver' | 'admin';
 
 const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }) => {
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<DriverSaleData | null>(null);
   const [sales,        setSales]        = useState<DirectSale[]>([]);
   const [drivers,      setDrivers]      = useState<DriverOption[]>([]);
   const [loading,      setLoading]      = useState(true);
@@ -1094,6 +1135,29 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
       })
       .catch(() => {});
   }, []);
+
+  const handleReceipt = (sale: DirectSale) => {
+    const { name: custName, phone, isAccount } = parseCustomer(sale.notes);
+
+    const pmMatch = (sale.notes ?? '').match(/Payment:\s*(\w+)/i);
+
+    const data: DriverSaleData = {
+      productName: sale.product_name,
+      productUnit: 'UNITS',
+      isReturnable: sale.product_type === 'bottle',
+      quantity: sale.quantity,
+      unitPrice: 0,
+      customerName: sale.customer_name || custName || 'Walk-in Customer',
+      customerPhone: phone || undefined,
+      isWalkIn: !isAccount,
+      paymentMethod: pmMatch?.[1] ?? 'CASH',
+      servedBy: soldBy(sale),
+      date: sale.movement_date,
+    };
+
+    setReceiptSale(data);
+    setReceiptOpen(true);
+  };
 
   // ── Load all sales ────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -1405,13 +1469,13 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40">
-                  {['Date / Time', 'Sold By', 'Product', 'Qty', 'Customer'].map(h => (
+                  {['Date / Time', 'Sold By', 'Product', 'Qty', 'Customer', ''].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((sale, i) => <SaleRow key={sale.id} sale={sale} isEven={i % 2 === 0} />)}
+                {filtered.map((sale, i) => <SaleRow key={sale.id} sale={sale} isEven={i % 2 === 0} onReceipt={handleReceipt} />)}
               </tbody>
             </table>
             <div className="px-4 py-2.5 border-t bg-muted/20 flex items-center justify-between">
@@ -1435,8 +1499,8 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
                     {items.length} sale{items.length !== 1 ? 's' : ''} · {items.reduce((s, i) => s + i.quantity, 0)} units
                   </span>
                 </div>
-                <div className="space-y-2.5">
-                  {items.map(sale => <SaleCard key={sale.id} sale={sale} />)}
+                <div className="space-y-2.5">const SaleCard
+                  {items.map(sale => <SaleCard key={sale.id} sale={sale} onReceipt={handleReceipt} />)}
                 </div>
               </div>
             ))}
@@ -1459,6 +1523,13 @@ const DirectSalesPage: React.FC<DeliveriesPageProps> = ({ layout = 'dashboard' }
         onClose={() => setSaleMode(null)}
         onSaved={() => load()}
       />
+      {receiptSale && (
+        <DriverSaleReceiptModal
+          open={receiptOpen}
+          onClose={() => { setReceiptOpen(false); setReceiptSale(null); }}
+          sale={receiptSale}
+        />
+      )}      
     </Wrapper>
   );
 };

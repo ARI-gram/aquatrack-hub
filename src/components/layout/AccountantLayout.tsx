@@ -45,6 +45,12 @@ const NAV_ITEMS: NavItem[] = [
     sublabel: 'Financial overview',
   },
   {
+    label:    'Customers',
+    path:     '/client/accounts/customers',
+    icon:     Users,
+    sublabel: 'Balances & accounts',
+  },
+  {
     label:    'Invoices',
     path:     ROUTES.ACCOUNTANT.INVOICES,
     icon:     FileText,
@@ -55,12 +61,6 @@ const NAV_ITEMS: NavItem[] = [
     path:     '/client/accounts/direct-sales',
     icon:     ShoppingBag,
     sublabel: 'One-off sales',
-  },
-  {
-    label:    'Customers',
-    path:     '/client/accounts/customers',
-    icon:     Users,
-    sublabel: 'Balances & accounts',
   },
   {
     label:    'Reports',
