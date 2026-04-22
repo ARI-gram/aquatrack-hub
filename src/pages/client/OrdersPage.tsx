@@ -8,6 +8,9 @@
  * "Make Delivery" replaces the old per-order "Assign Driver" flow.
  * It opens MakeDeliveryDialog which lets the admin bundle multiple
  * unassigned orders → schedule → assign driver in one step.
+ *
+ * Top-level tabs: Orders | Stock Requests
+ * Stock Requests tab shows StockRequestsPanel with a live pending-count badge.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -54,11 +57,15 @@ import {
   InboxIcon,
   AlertCircle,
   Plus,
+  PackagePlus,
 } from 'lucide-react';
 import axiosInstance from '@/api/axios.config';
 import { toast } from 'sonner';
 import { MakeDeliveryDialog } from '@/components/dialogs/MakeDeliveryDialog';
 import { CreateOrderDialog } from '@/components/dialogs/CreateOrderDialog';
+import { StockRequestsPanel } from '@/components/store/StockRequestsPanel';
+import { useStockRequestPendingCount } from '@/hooks/useStockRequestPendingCount';
+import { cn } from '@/lib/utils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -151,7 +158,6 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
   REFILL: 'Refill', NEW_BOTTLE: 'New Bottle', MIXED: 'Mixed',
 };
 
-// Statuses a client admin can manually advance an order to.
 const ALLOWED_NEXT_STATUSES: Record<string, string[]> = {
   PENDING:    ['CONFIRMED', 'CANCELLED'],
   CONFIRMED:  ['CANCELLED'],
@@ -313,7 +319,6 @@ const OrderDialog: React.FC<OrderDialogProps> = ({
                   </div>
                 </div>
 
-                {/* Driver row — read only (assignment is via Make Delivery) */}
                 {order.delivery.driver_name ? (
                   <div className="flex items-center gap-2.5 pt-2 border-t">
                     <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -418,7 +423,6 @@ const OrderDialog: React.FC<OrderDialogProps> = ({
               Actions
             </p>
 
-            {/* Status progression (excludes CANCELLED — handled separately below) */}
             {nextStatuses.filter(s => s !== 'CANCELLED').length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {nextStatuses.filter(s => s !== 'CANCELLED').map(s => (
@@ -440,7 +444,6 @@ const OrderDialog: React.FC<OrderDialogProps> = ({
               </div>
             )}
 
-            {/* Cancel — only shown if canCancel prop allows it */}
             {cancellable && (
               <div>
                 {showCancelConfirm ? (
@@ -625,6 +628,65 @@ const TableRow: React.FC<{ order: Order; onOpen: () => void; isEven: boolean }> 
   );
 };
 
+// ── Top-level Tab Switcher ────────────────────────────────────────────────────
+
+type PageTab = 'orders' | 'stock-requests';
+
+const PageTabBar: React.FC<{
+  active:         PageTab;
+  onChange:       (t: PageTab) => void;
+  pendingCount:   number;
+  ordersCount:    number;
+}> = ({ active, onChange, pendingCount, ordersCount }) => (
+  <div className="flex gap-1 p-1 bg-muted/50 rounded-2xl border border-border/50 mb-6 w-fit">
+    <button
+      onClick={() => onChange('orders')}
+      className={cn(
+        'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all',
+        active === 'orders'
+          ? 'bg-background text-foreground shadow-sm border border-border/60'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      <Package className="h-4 w-4 shrink-0" />
+      Orders
+      {ordersCount > 0 && (
+        <span className={cn(
+          'inline-flex items-center justify-center min-w-[20px] h-5 rounded-full text-[10px] font-black px-1.5',
+          active === 'orders'
+            ? 'bg-foreground text-background'
+            : 'bg-muted text-muted-foreground',
+        )}>
+          {ordersCount}
+        </span>
+      )}
+    </button>
+
+    <button
+      onClick={() => onChange('stock-requests')}
+      className={cn(
+        'relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all',
+        active === 'stock-requests'
+          ? 'bg-background text-foreground shadow-sm border border-border/60'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      <PackagePlus className="h-4 w-4 shrink-0" />
+      Stock Requests
+      {pendingCount > 0 && (
+        <span className={cn(
+          'inline-flex items-center justify-center min-w-[20px] h-5 rounded-full text-[10px] font-black px-1.5',
+          active === 'stock-requests'
+            ? 'bg-amber-500 text-white'
+            : 'bg-amber-100 text-amber-700 border border-amber-200',
+        )}>
+          {pendingCount}
+        </span>
+      )}
+    </button>
+  </div>
+);
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 interface OrdersPageProps {
@@ -636,14 +698,18 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   layout = 'dashboard',
   canCancel: canCancelProp = true,
 }) => {
-  const [orders, setOrders]               = useState<Order[]>([]);
-  const [isLoading, setIsLoading]         = useState(true);
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [statusFilter, setStatusFilter]   = useState('all');
-  const [dateFilter, setDateFilter]       = useState('all');
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [activeTab, setActiveTab]             = useState<PageTab>('orders');
+  const [orders, setOrders]                   = useState<Order[]>([]);
+  const [isLoading, setIsLoading]             = useState(true);
+  const [searchQuery, setSearchQuery]         = useState('');
+  const [statusFilter, setStatusFilter]       = useState('all');
+  const [dateFilter, setDateFilter]           = useState('all');
+  const [selectedOrder, setSelectedOrder]     = useState<Order | null>(null);
   const [makeDeliveryOpen, setMakeDeliveryOpen] = useState(false);
-  const [createOrderOpen, setCreateOrderOpen] = useState(false);
+  const [createOrderOpen, setCreateOrderOpen]   = useState(false);
+
+  // Live pending count badge on the Stock Requests tab
+  const pendingStockCount = useStockRequestPendingCount();
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -701,10 +767,6 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
     }
   };
 
-  /**
-   * Called by MakeDeliveryDialog after a successful batch assignment.
-   * Optimistically marks all affected orders as ASSIGNED and refreshes.
-   */
   const handleDeliveryMade = useCallback((orderIds: string[], driverName: string) => {
     setOrders(prev =>
       prev.map(o =>
@@ -742,17 +804,12 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
     return acc;
   }, {});
 
-  const activeCount    = orders.filter(
-    o => !['COMPLETED', 'CANCELLED', 'DELIVERED'].includes(o.status),
-  ).length;
-  const completedCount = orders.filter(
-    o => ['COMPLETED', 'DELIVERED'].includes(o.status),
-  ).length;
+  const activeCount    = orders.filter(o => !['COMPLETED', 'CANCELLED', 'DELIVERED'].includes(o.status)).length;
+  const completedCount = orders.filter(o => ['COMPLETED', 'DELIVERED'].includes(o.status)).length;
   const revenue = orders
     .filter(o => o.payment_status === 'PAID')
     .reduce((s, o) => s + parseFloat(o.total_amount), 0);
 
-  // How many unassigned pending/confirmed orders exist (drives the badge on the button)
   const unassignedCount = orders.filter(
     o => ['PENDING', 'CONFIRMED'].includes(o.status) && !o.delivery?.driver_name,
   ).length;
@@ -769,202 +826,185 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   return (
     <Wrapper>
 
-      {/* Search + date filter + refresh + actions */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search by order number or customer…"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 h-10 rounded-xl bg-muted/40 border-transparent focus:border-input"
-          />
-        </div>
-        <Select value={dateFilter} onValueChange={setDateFilter}>
-          <SelectTrigger className="h-10 rounded-xl bg-muted/40 border-transparent text-sm w-full sm:w-44">
-            <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-            <SelectValue placeholder="Date range" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">Last 7 days</SelectItem>
-            <SelectItem value="month">Last 30 days</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-10 rounded-xl gap-2 shrink-0"
-          onClick={fetchOrders}
-          disabled={isLoading}
-        >
-          {isLoading
-            ? <Loader2 className="h-4 w-4 animate-spin" />
-            : <RefreshCw className="h-4 w-4" />
-          }
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
+      {/* ── Top-level tab switcher ── */}
+      <PageTabBar
+        active={activeTab}
+        onChange={setActiveTab}
+        pendingCount={pendingStockCount}
+        ordersCount={orders.length}
+      />
 
-        {/* Divider */}
-        <div className="hidden sm:block w-px bg-border self-stretch" />
-
-        <Button
-          variant="outline"
-          className="gap-2 h-10 rounded-xl font-semibold shrink-0"
-          onClick={() => setCreateOrderOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">Create Order</span>
-          <span className="sm:hidden">Create</span>
-        </Button>
-        <Button
-          className="gap-2 h-10 rounded-xl font-semibold shadow-sm shrink-0"
-          onClick={() => setMakeDeliveryOpen(true)}
-        >
-          <Truck className="h-4 w-4" />
-          <span className="hidden sm:inline">Make Delivery</span>
-          <span className="sm:hidden">Deliver</span>
-          {unassignedCount > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[18px] h-4 rounded-full bg-white/20 text-[10px] font-bold px-1">
-              {unassignedCount}
-            </span>
-          )}
-        </Button>
-      </div>
-      
-      {/* Stats strip */}
-      {!isLoading && orders.length > 0 && (
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-0.5 -mx-1 px-1">
-          {[
-            { label: 'Total',     val: orders.length,                     cls: 'bg-muted/60 text-foreground border-border'         },
-            { label: 'Active',    val: activeCount,                       cls: 'bg-blue-50 text-blue-700 border-blue-200'          },
-            { label: 'Completed', val: completedCount,                    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-            { label: 'Revenue',   val: `KES ${revenue.toLocaleString()}`, cls: 'bg-violet-50 text-violet-700 border-violet-200'    },
-          ].map(({ label, val, cls }) => (
-            <div key={label} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold shrink-0 ${cls}`}>
-              <span className="text-base font-bold leading-none">{val}</span>
-              <span className="opacity-60">{label}</span>
-            </div>
-          ))}
-        </div>
+      {/* ══════════════════════════════════════════════════════════════════════
+          STOCK REQUESTS TAB
+      ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'stock-requests' && (
+        <StockRequestsPanel />
       )}
 
-      {/* Status filter pills */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        <button
-          onClick={() => setStatusFilter('all')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${statusFilter === 'all' ? 'bg-foreground text-background border-foreground' : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border'}`}
-        >
-          All ({orders.length})
-        </button>
-        {(['PENDING', 'CONFIRMED', 'ASSIGNED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED', 'CANCELLED'] as OrderStatus[]).map(s => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${statusFilter === s ? 'bg-foreground text-background border-foreground' : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border'}`}
-          >
-            {STATUS_CFG[s]?.label ?? s} ({statusCounts[s] ?? 0})
-          </button>
-        ))}
-      </div>
-
-      {/* Search + date filter + refresh */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search by order number or customer…"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 h-10 rounded-xl bg-muted/40 border-transparent focus:border-input"
-          />
-        </div>
-        <Select value={dateFilter} onValueChange={setDateFilter}>
-          <SelectTrigger className="h-10 rounded-xl bg-muted/40 border-transparent text-sm w-full sm:w-44">
-            <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-            <SelectValue placeholder="Date range" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">Last 7 days</SelectItem>
-            <SelectItem value="month">Last 30 days</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-10 rounded-xl gap-2 shrink-0"
-          onClick={fetchOrders}
-          disabled={isLoading}
-        >
-          {isLoading
-            ? <Loader2 className="h-4 w-4 animate-spin" />
-            : <RefreshCw className="h-4 w-4" />
-          }
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
-      </div>
-
-      {/* Content */}
-      {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
-          <Loader2 className="h-7 w-7 animate-spin text-primary/50" />
-          <p className="text-sm">Loading orders…</p>
-        </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-          <div className="h-16 w-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-4">
-            <InboxIcon className="h-8 w-8 text-muted-foreground/40" />
-          </div>
-          <p className="font-semibold mb-1">
-            {orders.length === 0 ? 'No orders yet' : 'No results found'}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {orders.length === 0
-              ? 'Customer orders will appear here as they come in.'
-              : 'Try adjusting your search or filters.'
-            }
-          </p>
-        </div>
-      ) : (
+      {/* ══════════════════════════════════════════════════════════════════════
+          ORDERS TAB
+      ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'orders' && (
         <>
-          {/* Desktop table */}
-          <div className="hidden md:block rounded-2xl border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  {['Order', 'Customer', 'Scheduled', 'Driver', 'Status', 'Payment', 'Total', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredOrders.map((order, i) => (
-                  <TableRow
+          {/* Toolbar: search + date + refresh + actions */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-5">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Search by order number or customer…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 rounded-xl bg-muted/40 border-transparent focus:border-input"
+              />
+            </div>
+            <Select value={dateFilter} onValueChange={setDateFilter}>
+              <SelectTrigger className="h-10 rounded-xl bg-muted/40 border-transparent text-sm w-full sm:w-44">
+                <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="Date range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">Last 7 days</SelectItem>
+                <SelectItem value="month">Last 30 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-xl gap-2 shrink-0"
+              onClick={fetchOrders}
+              disabled={isLoading}
+            >
+              {isLoading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <RefreshCw className="h-4 w-4" />
+              }
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+
+            <div className="hidden sm:block w-px bg-border self-stretch" />
+
+            <Button
+              variant="outline"
+              className="gap-2 h-10 rounded-xl font-semibold shrink-0"
+              onClick={() => setCreateOrderOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Create Order</span>
+              <span className="sm:hidden">Create</span>
+            </Button>
+            <Button
+              className="gap-2 h-10 rounded-xl font-semibold shadow-sm shrink-0"
+              onClick={() => setMakeDeliveryOpen(true)}
+            >
+              <Truck className="h-4 w-4" />
+              <span className="hidden sm:inline">Make Delivery</span>
+              <span className="sm:hidden">Deliver</span>
+              {unassignedCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-4 rounded-full bg-white/20 text-[10px] font-bold px-1">
+                  {unassignedCount}
+                </span>
+              )}
+            </Button>
+          </div>
+
+          {/* Stats strip */}
+          {!isLoading && orders.length > 0 && (
+            <div className="flex gap-2 mb-6 overflow-x-auto pb-0.5 -mx-1 px-1">
+              {[
+                { label: 'Total',     val: orders.length,                     cls: 'bg-muted/60 text-foreground border-border'         },
+                { label: 'Active',    val: activeCount,                       cls: 'bg-blue-50 text-blue-700 border-blue-200'          },
+                { label: 'Completed', val: completedCount,                    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                { label: 'Revenue',   val: `KES ${revenue.toLocaleString()}`, cls: 'bg-violet-50 text-violet-700 border-violet-200'    },
+              ].map(({ label, val, cls }) => (
+                <div key={label} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold shrink-0 ${cls}`}>
+                  <span className="text-base font-bold leading-none">{val}</span>
+                  <span className="opacity-60">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Status filter pills */}
+          <div className="flex flex-wrap gap-2 mb-5">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${statusFilter === 'all' ? 'bg-foreground text-background border-foreground' : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border'}`}
+            >
+              All ({orders.length})
+            </button>
+            {(['PENDING', 'CONFIRMED', 'ASSIGNED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED', 'CANCELLED'] as OrderStatus[]).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${statusFilter === s ? 'bg-foreground text-background border-foreground' : 'bg-muted/40 text-muted-foreground border-transparent hover:border-border'}`}
+              >
+                {STATUS_CFG[s]?.label ?? s} ({statusCounts[s] ?? 0})
+              </button>
+            ))}
+          </div>
+
+          {/* Content */}
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+              <Loader2 className="h-7 w-7 animate-spin text-primary/50" />
+              <p className="text-sm">Loading orders…</p>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+              <div className="h-16 w-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-4">
+                <InboxIcon className="h-8 w-8 text-muted-foreground/40" />
+              </div>
+              <p className="font-semibold mb-1">
+                {orders.length === 0 ? 'No orders yet' : 'No results found'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {orders.length === 0
+                  ? 'Customer orders will appear here as they come in.'
+                  : 'Try adjusting your search or filters.'
+                }
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop table */}
+              <div className="hidden md:block rounded-2xl border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      {['Order', 'Customer', 'Scheduled', 'Driver', 'Status', 'Payment', 'Total', ''].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOrders.map((order, i) => (
+                      <TableRow
+                        key={order.id}
+                        order={order}
+                        isEven={i % 2 === 0}
+                        onOpen={() => setSelectedOrder(order)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile cards */}
+              <div className="md:hidden space-y-3">
+                {filteredOrders.map(order => (
+                  <OrderCard
                     key={order.id}
                     order={order}
-                    isEven={i % 2 === 0}
                     onOpen={() => setSelectedOrder(order)}
                   />
                 ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3">
-            {filteredOrders.map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                onOpen={() => setSelectedOrder(order)}
-              />
-            ))}
-          </div>
+              </div>
+            </>
+          )}
         </>
       )}
 

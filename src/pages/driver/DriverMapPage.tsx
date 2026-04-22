@@ -1,8 +1,3 @@
-/**
- * src/pages/driver/DriverMapPage.tsx
- * Mobile-first navigation page — map takes priority, controls are compact
- */
-
 import React, {
   useState, useEffect, useRef, useCallback, useMemo,
 } from 'react';

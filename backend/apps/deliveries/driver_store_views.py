@@ -33,16 +33,18 @@ def _compute_bottle_balance(driver, product) -> dict:
     used = qs.filter(movement_type='DELIVERY_USE').aggregate(
         good=Sum('qty_good'))
 
-    # Empties collected from customers (on the road)
+    # ALL empties collected from customers (road + delivery completion)
+    # recorded_by=None means driver-side (not yet handed to office)
     collected = qs.filter(
         movement_type='RECEIVE_EMPTY',
-        recorded_by__isnull=True,   # driver-side collection, not office
+        recorded_by__isnull=True,
     ).aggregate(good=Sum('qty_good'))
 
-    # Empties handed back to office
+    # Empties the driver has already handed back to the office
+    # recorded_by__isnull=False means an office staff member logged the handover
     returned_to_office = qs.filter(
         movement_type='RECEIVE_EMPTY',
-        recorded_by__isnull=False,  # office staff recorded this
+        recorded_by__isnull=False,
     ).aggregate(good=Sum('qty_good'), damaged=Sum('qty_damaged'))
 
     full = (
@@ -51,7 +53,8 @@ def _compute_bottle_balance(driver, product) -> dict:
         - (used['good'] or 0)
     )
 
-    # Driver's empty count = what they collected on road - what they already handed to office
+    # Empties driver is currently holding = collected on road/delivery
+    # minus what they've already handed back to office
     empty = (
         (collected['good'] or 0)
         - (returned_to_office['good'] or 0)
@@ -60,7 +63,6 @@ def _compute_bottle_balance(driver, product) -> dict:
 
     return {
         'full':    max(0, full),
-        # ← now tracks real empties the driver is holding
         'empty':   max(0, empty),
         'damaged': distributed['damaged'] or 0,
         'missing': distributed['missing'] or 0,

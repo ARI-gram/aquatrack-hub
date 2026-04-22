@@ -1,12 +1,3 @@
-/**
- * src/pages/driver/DriverHistoryPage.tsx
- * Mobile-first delivery history page
- *
- * Changes in this revision:
- *  - COMPLETED delivery cards now have a "Receipt" button alongside "Details"
- *  - Tapping it fetches the full delivery detail and opens DeliveryReceiptModal
- */
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DriverLayout } from '@/components/layout/DriverLayout';

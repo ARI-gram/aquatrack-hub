@@ -1,8 +1,3 @@
-/**
- * src/pages/driver/DriverProfilePage.tsx
- * Mobile-first profile page
- */
-
 import React, { useState, useEffect } from 'react';
 import { DriverLayout } from '@/components/layout/DriverLayout';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';

@@ -1,9 +1,5 @@
 /**
  * src/pages/driver/DriverSettingsPage.tsx
- *
- * Changes: Password change wired to authService.changePassword().
- * UI-only settings (notifications, dark mode, language, location)
- * remain in localStorage — no backend endpoint exists for these.
  */
 
 import React, { useState } from 'react';

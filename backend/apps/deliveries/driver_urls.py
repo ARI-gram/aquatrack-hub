@@ -6,6 +6,7 @@ Driver mobile app endpoints — mounted at /api/driver/
 from django.urls import path
 from apps.deliveries import views
 from apps.deliveries import driver_store_views
+from apps.deliveries import stock_request_views
 
 app_name = 'driver-deliveries'
 
@@ -108,4 +109,14 @@ urlpatterns = [
     path('store/direct-sales/',
          driver_store_views.ClientDirectSalesView.as_view(),
          name='store-direct-sales'),
+
+    # POST /api/driver/store/request-topup/
+    path('store/request-topup/',
+         stock_request_views.DriverCreateStockRequestView.as_view(),
+         name='store-request-topup'),
+
+    # GET /api/driver/store/my-requests/
+    path('store/my-requests/',
+         stock_request_views.DriverMyStockRequestsView.as_view(),
+         name='store-my-requests'),
 ]

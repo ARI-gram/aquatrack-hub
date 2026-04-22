@@ -1,16 +1,3 @@
-/**
- * src/pages/driver/DriverReceiptsPage.tsx
- *
- * Lets a driver look up any completed delivery and re-issue the receipt.
- * Use case: customer says "I lost my invoice, can I get another one?"
- *
- * NOTE on date filtering:
- *   The backend DriverDeliveryListView `date` param does an EXACT date match,
- *   not a range. So we fetch ALL completed deliveries once and filter the
- *   list client-side by scheduled_date. This is correct and avoids needing
- *   backend changes.
- */
-
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Search, X, Receipt, Loader2,
@@ -230,7 +217,7 @@ export const DriverReceiptsPage: React.FC = () => {
     try {
       // No date param → backend returns all completed deliveries for this driver
       const data = await deliveryService.getDriverDeliveries(undefined, 'COMPLETED');
-      const raw: DriverDelivery[] = data.deliveries || data || [];
+      const raw: DriverDelivery[] = data.deliveries ?? [];
       setAllDeliveries(raw);
     } catch {
       toast.error('Failed to load receipts');

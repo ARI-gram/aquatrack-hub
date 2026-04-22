@@ -2,7 +2,9 @@
 apps/deliveries/models.py
 """
 
+import uuid
 import random
+from django.conf import settings
 from datetime import timedelta
 from django.dispatch import receiver
 from django.db.models.signals import post_save
@@ -295,4 +297,132 @@ class DeliveryOTP(models.Model):
             delivery=delivery,
             otp_code=code,
             expires_at=timezone.now() + timedelta(hours=24),
+        )
+
+
+class StockRequest(models.Model):
+    """
+    A driver asks the store to top up their van with one or more products.
+    The store admin reviews, adjusts quantities if needed, then approves
+    (which triggers stock distribution) or rejects with a reason.
+    """
+
+    STATUS_CHOICES = [
+        ('PENDING',            'Pending'),
+        ('APPROVED',           'Approved'),
+        ('PARTIALLY_APPROVED', 'Partially Approved'),
+        ('REJECTED',           'Rejected'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='stock_requests',
+        limit_choices_to={'role': 'driver'},
+    )
+
+    # Optional link to a specific delivery that prompted this request
+    delivery = models.ForeignKey(
+        'deliveries.Delivery',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='stock_requests',
+    )
+
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+
+    notes = models.TextField(blank=True, help_text='Driver notes to the store')
+    rejection_reason = models.TextField(blank=True)
+
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='approved_stock_requests',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'stock_requests'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['driver', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'StockRequest {self.id} — {self.driver} [{self.status}]'
+
+    @property
+    def driver_name(self):
+        d = self.driver
+        name = f'{getattr(d, "first_name", "")} {getattr(d, "last_name", "")}'.strip(
+        )
+        return name or d.email
+
+    @property
+    def vehicle_number(self):
+        return getattr(self.driver, 'vehicle_number', '') or ''
+
+    @property
+    def delivery_order_number(self):
+        if self.delivery and self.delivery.order:
+            return self.delivery.order.order_number
+        return None
+
+
+class StockRequestItem(models.Model):
+    """
+    One product line inside a StockRequest.
+    quantity_approved is set by the store admin when approving — it can be
+    less than quantity_requested (partial approval).
+    """
+
+    PRODUCT_TYPE_CHOICES = [
+        ('bottle',     'Bottle (returnable)'),
+        ('consumable', 'Consumable'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    request = models.ForeignKey(
+        StockRequest,
+        on_delete=models.CASCADE,
+        related_name='items',
+    )
+
+    product = models.ForeignKey(
+        'products.Product',
+        on_delete=models.CASCADE,
+        related_name='stock_request_items',
+    )
+
+    # Denormalised for display even if product is later archived
+    product_name = models.CharField(max_length=200)
+    product_type = models.CharField(
+        max_length=20, choices=PRODUCT_TYPE_CHOICES)
+    unit = models.CharField(max_length=20, blank=True)
+
+    quantity_requested = models.PositiveIntegerField()
+    quantity_approved = models.PositiveIntegerField(null=True, blank=True)
+
+    # Snapshot of driver's van balance at the time of the request
+    current_qty_at_request = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'stock_request_items'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return (
+            f'{self.product_name} ×{self.quantity_requested}'
+            f' (approved: {self.quantity_approved})'
         )

@@ -38,17 +38,24 @@ const STATUS_TO_TIMELINE: Record<string, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Failure modal — bottom sheet on mobile
+// Failure reasons — value must match backend Delivery.failure_reason choices
+// exactly: CUSTOMER_UNAVAILABLE | WRONG_ADDRESS | CUSTOMER_CANCELLED |
+//          VEHICLE_BREAKDOWN | WEATHER | TRAFFIC | OTHER
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FAIL_REASONS = [
-  'Customer not home',
-  'Customer refused delivery',
-  'Incorrect address',
-  'Payment issue',
-  'Access denied',
-  'Other',
+const FAIL_REASONS: Array<{ value: string; label: string }> = [
+  { value: 'CUSTOMER_UNAVAILABLE', label: 'Customer not available / not home' },
+  { value: 'WRONG_ADDRESS',        label: 'Incorrect or wrong address'         },
+  { value: 'CUSTOMER_CANCELLED',   label: 'Customer cancelled the delivery'    },
+  { value: 'VEHICLE_BREAKDOWN',    label: 'Vehicle breakdown'                  },
+  { value: 'WEATHER',              label: 'Bad weather conditions'             },
+  { value: 'TRAFFIC',              label: 'Heavy traffic / road blocked'       },
+  { value: 'OTHER',                label: 'Other (see notes)'                  },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Failure modal — bottom sheet on mobile
+// ─────────────────────────────────────────────────────────────────────────────
 
 const FailureModal: React.FC<{
   onClose:  () => void;
@@ -92,16 +99,16 @@ const FailureModal: React.FC<{
           <div className="space-y-2">
             {FAIL_REASONS.map(r => (
               <button
-                key={r}
-                onClick={() => setReason(r)}
+                key={r.value}
+                onClick={() => setReason(r.value)}
                 className={cn(
                   'w-full text-left text-sm font-semibold px-4 py-3.5 rounded-2xl border-2 transition-all active:scale-[0.98]',
-                  reason === r
+                  reason === r.value
                     ? 'bg-red-50 border-red-300 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-300'
                     : 'bg-muted/30 border-border/50 text-foreground hover:border-border',
                 )}
               >
-                {r}
+                {r.label}
               </button>
             ))}
           </div>
@@ -186,10 +193,12 @@ export const DeliveryDetailPage: React.FC = () => {
   };
 
   const handleFailed = async (reason: string, notes: string) => {
+    // `reason` is already the correct backend value (e.g. 'CUSTOMER_UNAVAILABLE')
+    // — no transformation needed, passed straight through.
     if (!id) return;
     try {
       await deliveryService.updateStatus(id, 'FAILED', {
-        failure_reason: reason.toUpperCase().replace(/ /g, '_'),
+        failure_reason: reason,
         failure_notes:  notes,
       });
       toast.success('Delivery marked as failed');
@@ -323,7 +332,7 @@ export const DeliveryDetailPage: React.FC = () => {
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
-              {/* Step dots — always visible */}
+              {/* Step dots */}
               <div className="flex justify-between mt-2.5">
                 {PROGRESS_STEPS.map(s => {
                   const { isDone, isCurrent } = getStepState(s);
@@ -478,7 +487,7 @@ export const DeliveryDetailPage: React.FC = () => {
               </div>
             )}
 
-            {/* Action buttons — full width on mobile */}
+            {/* Action buttons */}
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 onClick={() => window.open(`tel:${delivery.customer?.phone}`)}

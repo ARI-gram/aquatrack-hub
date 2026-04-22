@@ -20,6 +20,13 @@ from apps.products.store_views import (
     DirectSaleConsumableView,
 )
 
+from apps.deliveries.stock_request_views import (
+    StockRequestListView,
+    StockRequestDetailView,
+    StockRequestApproveView,
+    StockRequestRejectView,
+)
+
 from apps.deliveries.driver_store_views import ClientDriverVanStockView
 
 app_name = 'store'
@@ -55,4 +62,21 @@ urlpatterns = [
     # ── Driver Van Stock (both bottles and consumables) ───────────────────────
     path('driver-stock/', ClientDriverVanStockView.as_view(),
          name='driver-van-stock'),
+
+    # ── Stock requests (driver top-up requests) ───────────────────────
+    path('stock-requests/',
+         StockRequestListView.as_view(),
+         name='stock-request-list'),
+
+    path('stock-requests/<uuid:request_id>/',
+         StockRequestDetailView.as_view(),
+         name='stock-request-detail'),
+
+    path('stock-requests/<uuid:request_id>/approve/',
+         StockRequestApproveView.as_view(),
+         name='stock-request-approve'),
+
+    path('stock-requests/<uuid:request_id>/reject/',
+         StockRequestRejectView.as_view(),
+         name='stock-request-reject'),
 ]

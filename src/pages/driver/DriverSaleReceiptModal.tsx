@@ -1,17 +1,4 @@
 // src/components/driver/DriverSaleReceiptModal.tsx
-//
-// Receipt modal for driver roadside direct sales.
-// Opens after a successful DirectSaleDialog submission.
-// Mobile-first — designed for phone use on the road.
-//
-// Fixes applied:
-//  ✅ Settings fetch now retries on /client/accounting-settings/ with
-//     proper error surfacing so "Your Business Name" no longer appears
-//     when settings exist but the fetch was silently failing.
-//  ✅ unitPrice = 0 guard — when price is genuinely 0 the receipt still
-//     renders cleanly; the fix for actually passing the price lives in
-//     StorePage.tsx / DirectSaleDialog (selling_price prop).
-
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {

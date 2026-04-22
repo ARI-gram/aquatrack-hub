@@ -7,6 +7,13 @@
  *  - Action buttons resized: icon-only Call/Nav + full-width primary action
  *  - Desktop: single-col queue + thin completed sidebar (rate card removed)
  *  - All original logic, state, and handlers preserved exactly
+ *
+ * UPDATE: CompleteDeliveryDialog now uses the same CompleteTarget pattern
+ * as DeliveryQueuePage — passes initialDelivery when a delivery is ACCEPTED
+ * so the dialog opens directly on the confirm step instead of the list.
+ *
+ * UPDATE 2: "Request Top-up" quick action now opens StockRequestDialog
+ * instead of navigating to /driver/store.
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -24,6 +31,7 @@ import {
 } from '@/api/services/driver-store.service';
 import { CompleteDeliveryDialog } from '@/components/dialogs/CompleteDeliveryDialog';
 import { DirectSaleDialog } from '@/components/dialogs/DirectSaleDialog';
+import { StockRequestDialog } from '@/components/dialogs/StockRequestDialog';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -31,6 +39,11 @@ import { cn } from '@/lib/utils';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SortKey = 'status_active' | 'time_asc';
+
+// Mirrors the CompleteTarget pattern from DeliveryQueuePage
+type CompleteTarget =
+  | { mode: 'list' }
+  | { mode: 'single'; delivery: DriverDelivery };
 
 interface DriverProfile {
   driver: { name: string; phone: string; vehicle_number: string };
@@ -77,7 +90,6 @@ const StatusPill: React.FC<{ status: string }> = ({ status }) => {
 };
 
 // ── Quick Action Bar ──────────────────────────────────────────────────────────
-// Placed between the progress bar and Next Stop hero for immediate visibility.
 
 const QuickActionBar: React.FC<{
   onComplete: () => void;
@@ -134,7 +146,6 @@ const QuickActionBar: React.FC<{
 };
 
 // ── Next Stop Hero Card ────────────────────────────────────────────────────────
-// Shown only when there is an ACCEPTED delivery — the driver's immediate focus.
 
 const NextStopHero: React.FC<{
   delivery:   DriverDelivery;
@@ -216,7 +227,6 @@ const NextStopHero: React.FC<{
 );
 
 // ── Delivery Card (queue items) ───────────────────────────────────────────────
-// Slimmer than before: left bar + info + icon actions + primary CTA
 
 const DeliveryCard: React.FC<{
   delivery:   DriverDelivery;
@@ -287,7 +297,7 @@ const DeliveryCard: React.FC<{
           </div>
         )}
 
-        {/* Actions: icon buttons + primary CTA fills remaining width */}
+        {/* Actions */}
         <div className="flex items-center gap-2">
           <button
             className="h-10 w-10 shrink-0 rounded-xl border border-border/60 bg-muted/30 flex items-center justify-center hover:bg-muted transition-colors active:scale-90"
@@ -330,15 +340,16 @@ export const DriverDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   // ── State ─────────────────────────────────────────────────────────────────
-  const [profile,      setProfile]      = useState<DriverProfile | null>(null);
-  const [deliveries,   setDeliveries]   = useState<DriverDelivery[]>([]);
-  const [bottles,      setBottles]      = useState<DriverBottleStock[]>([]);
-  const [consumables,  setConsumables]  = useState<DriverConsumableStock[]>([]);
-  const [isLoading,    setIsLoading]    = useState(true);
-  const [search,       setSearch]       = useState('');
-  const [sortKey,      setSortKey]      = useState<SortKey>('status_active');
-  const [completeOpen, setCompleteOpen] = useState(false);
-  const [saleOpen,     setSaleOpen]     = useState(false);
+  const [profile,         setProfile]         = useState<DriverProfile | null>(null);
+  const [deliveries,      setDeliveries]       = useState<DriverDelivery[]>([]);
+  const [bottles,         setBottles]          = useState<DriverBottleStock[]>([]);
+  const [consumables,     setConsumables]      = useState<DriverConsumableStock[]>([]);
+  const [isLoading,       setIsLoading]        = useState(true);
+  const [search,          setSearch]           = useState('');
+  const [sortKey,         setSortKey]          = useState<SortKey>('status_active');
+  const [completeTarget,  setCompleteTarget]   = useState<CompleteTarget | null>(null);
+  const [saleOpen,        setSaleOpen]         = useState(false);
+  const [topUpOpen,       setTopUpOpen]        = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -372,8 +383,9 @@ export const DriverDashboard: React.FC = () => {
   };
 
   const handleDone = useCallback(() => {
-    setCompleteOpen(false);
+    setCompleteTarget(null);
     setSaleOpen(false);
+    setTopUpOpen(false);
     loadData();
   }, [loadData]);
 
@@ -473,10 +485,22 @@ export const DriverDashboard: React.FC = () => {
       )}
 
       {/* ── Quick Actions ── */}
+      {/*
+        If there is an ACCEPTED delivery (nextDelivery), "Complete Delivery"
+        opens the dialog directly on that delivery's confirm step — same UX
+        as tapping Complete on a card in DeliveryQueuePage.
+        If no delivery is accepted yet, falls back to list mode so the driver
+        can pick one manually.
+        "Request Top-up" opens StockRequestDialog (auto-populates low/out items).
+      */}
       <QuickActionBar
-        onComplete={() => setCompleteOpen(true)}
-        onSale={()     => setSaleOpen(true)}
-        onTopUp={()    => navigate('/driver/store')}
+        onComplete={() => setCompleteTarget(
+          nextDelivery
+            ? { mode: 'single', delivery: nextDelivery }
+            : { mode: 'list' }
+        )}
+        onSale={() => setSaleOpen(true)}
+        onTopUp={() => setTopUpOpen(true)}
       />
 
       {/* ── Next Stop Hero ── only shown when a delivery is ACCEPTED */}
@@ -652,17 +676,28 @@ export const DriverDashboard: React.FC = () => {
       )}
 
       {/* ── Dialogs ── */}
+      {/* No initialGroup on the dashboard — bulk mode lives in DeliveryQueuePage */}
       <CompleteDeliveryDialog
-        open={completeOpen}
-        onClose={() => setCompleteOpen(false)}
+        open={completeTarget !== null}
+        onClose={() => setCompleteTarget(null)}
         onDone={handleDone}
+        initialDelivery={
+          completeTarget?.mode === 'single' ? completeTarget.delivery : undefined
+        }
       />
+
       <DirectSaleDialog
         open={saleOpen}
         onClose={() => setSaleOpen(false)}
         onDone={handleDone}
         bottles={bottles}
         consumables={consumables}
+      />
+
+      {/* Stock top-up request — auto-populates with low/out items from van stock */}
+      <StockRequestDialog
+        open={topUpOpen}
+        onClose={() => setTopUpOpen(false)}
       />
 
     </DriverLayout>

@@ -1,13 +1,28 @@
 /**
  * src/pages/driver/DeliveryQueuePage.tsx
  *
- * Mobile-first delivery queue with stock awareness.
- * Key mobile improvements:
- *  - Larger touch targets throughout
- *  - Horizontal scroll on stats strip removed; 2x2 grid on mobile
- *  - Cards use full-width layout with better info hierarchy
- *  - Action buttons are thumb-friendly (min 44px)
- *  - Search input has native keyboard type
+ * Mobile-first delivery queue with full stock-request integration.
+ *
+ * Anti-duplicate logic
+ * ──────────────────────────
+ * On load, the page fetches the driver's own requests via
+ * stockRequestService.getMyRequests() and filters to PENDING ones.
+ * Two derived sets are built:
+ *   • pendingDeliveryIds  — delivery IDs that already have a linked request
+ *   • pendingProductIds   — product IDs covered by any pending request
+ *
+ * A delivery is considered "alreadyRequested" when:
+ *   (a) its ID is in pendingDeliveryIds, OR
+ *   (b) every shortage product is covered by pendingProductIds
+ *
+ * When alreadyRequested=true:
+ *   • StockBadge     → shows "Requested ✓" pill instead of "Request →"
+ *   • CompleteButton → replaces Request button with a muted "Requested ✓" badge
+ *
+ * "Request All" / QuickAction "Request Stock":
+ *   • Items already covered by a pending request are filtered out before opening dialog
+ *   • If nothing new remains → toast instead of empty dialog
+ *   • Banner flips to green "Stock requests sent" when all shortages are covered
  */
 
 import React, {
@@ -18,7 +33,7 @@ import {
   MapPin, Clock, Phone, Navigation, Package, Loader2,
   Search, ChevronDown, X, Droplets, Layers, Check,
   AlertCircle, InboxIcon, CheckCircle2, ShoppingCart,
-  AlertTriangle, PackageX,
+  AlertTriangle, PackageX, PackagePlus,
 } from 'lucide-react';
 import { deliveryService, type DriverDelivery } from '@/api/services/delivery.service';
 import {
@@ -27,8 +42,13 @@ import {
   type DriverConsumableStock,
 } from '@/api/services/driver-store.service';
 import { CompleteDeliveryDialog } from '@/components/dialogs/CompleteDeliveryDialog';
+import { StockRequestDialog, type StockRequestItem } from '@/components/dialogs/StockRequestDialog';
 import { type CustomerGroup, buildGroups, parseSlot } from '@/lib/deliveryUtils';
 import { DirectSaleDialog } from '@/components/dialogs/DirectSaleDialog';
+import {
+  stockRequestService,
+  type StockRequest,
+} from '@/api/services/stock-request.service';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { AcceptDeclineButtons } from '@/pages/driver/AcceptDeclineButtons';
@@ -75,19 +95,25 @@ const STATUS_CFG: Record<string, {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stock helpers
+// Internal type — delivery with order_items from the serializer
 // ─────────────────────────────────────────────────────────────────────────────
 
 type DriverDeliveryWithItems = DriverDelivery & {
   order_items?: Array<{
-    id: string;
-    product_id: string;
-    product_name: string;
-    product_unit: string;
+    id:            string;
+    product_id:    string;
+    product_name:  string;
+    product_unit:  string;
     is_returnable: boolean;
-    quantity: number;
+    quantity:      number;
   }>;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure helpers — stock checking
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isActive(s: string) { return ACTIVE_STATUSES.includes(s); }
 
 function checkDeliveryStock(
   delivery: DriverDelivery,
@@ -115,11 +141,70 @@ function checkDeliveryStock(
   const allFull      = itemChecks.every(c => c.available_qty >= c.ordered_qty);
 
   const status: DeliveryStockStatus =
-    allFull      ? 'full' :
+    allFull      ? 'full'    :
     anyAvailable ? 'partial' :
-    'none';
+                   'none';
 
   return { status, itemChecks };
+}
+
+function buildStockRequestFromDeliveries(
+  deliveries: DriverDelivery[],
+  bottleMap: Map<string, number>,
+  consumableMap: Map<string, number>,
+): StockRequestItem[] {
+  const aggregated = new Map<string, StockRequestItem>();
+
+  for (const delivery of deliveries) {
+    if (!isActive(delivery.status)) continue;
+    const check = checkDeliveryStock(delivery, bottleMap, consumableMap);
+    if (check.status === 'unknown' || check.status === 'full') continue;
+
+    for (const item of check.itemChecks) {
+      const shortage = Math.max(0, item.ordered_qty - item.available_qty);
+      if (shortage <= 0) continue;
+
+      const existing = aggregated.get(item.product_id);
+      if (existing) {
+        aggregated.set(item.product_id, {
+          ...existing,
+          quantity_requested: existing.quantity_requested + shortage,
+          needed_qty: (existing.needed_qty ?? 0) + item.ordered_qty,
+        });
+      } else {
+        aggregated.set(item.product_id, {
+          product_id:         item.product_id,
+          product_name:       item.product_name,
+          product_type:       item.is_returnable ? 'bottle' : 'consumable',
+          current_qty:        item.available_qty,
+          needed_qty:         item.ordered_qty,
+          quantity_requested: shortage,
+        });
+      }
+    }
+  }
+
+  return Array.from(aggregated.values());
+}
+
+function buildStockRequestFromDelivery(
+  delivery: DriverDelivery,
+  bottleMap: Map<string, number>,
+  consumableMap: Map<string, number>,
+): StockRequestItem[] {
+  const check = checkDeliveryStock(delivery, bottleMap, consumableMap);
+  if (check.status === 'unknown' || check.status === 'full') return [];
+
+  return check.itemChecks
+    .filter(item => item.available_qty < item.ordered_qty)
+    .map(item => ({
+      product_id:         item.product_id,
+      product_name:       item.product_name,
+      product_type:       item.is_returnable ? 'bottle' : 'consumable',
+      current_qty:        item.available_qty,
+      needed_qty:         item.ordered_qty,
+      quantity_requested: Math.max(1, item.ordered_qty - item.available_qty),
+    }));
 }
 
 function buildBottleMap(bottles: DriverBottleStock[]): Map<string, number> {
@@ -129,80 +214,232 @@ function buildConsumableMap(consumables: DriverConsumableStock[]): Map<string, n
   return new Map(consumables.map(c => [c.product_id, c.balance.in_stock]));
 }
 
+function aggregateGroupStock(
+  group: CustomerGroup,
+  bottleMap: Map<string, number>,
+  consumableMap: Map<string, number>,
+): DeliveryStockCheck {
+  const activeDeliveries = group.deliveries.filter(d => isActive(d.status));
+  if (activeDeliveries.length === 0) return { status: 'full', itemChecks: [] };
+
+  const checks = activeDeliveries.map(d => checkDeliveryStock(d, bottleMap, consumableMap));
+  if (checks.some(c => c.status === 'unknown')) return { status: 'unknown', itemChecks: [] };
+
+  const merged = new Map<string, ItemStockStatus>();
+  for (const chk of checks) {
+    for (const item of chk.itemChecks) {
+      const existing = merged.get(item.product_id);
+      if (existing) {
+        merged.set(item.product_id, {
+          ...existing,
+          ordered_qty:   existing.ordered_qty + item.ordered_qty,
+          available_qty: item.available_qty,
+        });
+      } else {
+        merged.set(item.product_id, { ...item });
+      }
+    }
+  }
+
+  const itemChecks   = Array.from(merged.values());
+  const anyAvailable = itemChecks.some(c => c.available_qty > 0);
+  const allFull      = itemChecks.every(c => c.available_qty >= c.ordered_qty);
+  const status: DeliveryStockStatus = allFull ? 'full' : anyAvailable ? 'partial' : 'none';
+
+  return { status, itemChecks };
+}
+
+function buildPageGroups(deliveries: DriverDelivery[]): CustomerGroup[] {
+  return buildGroups(deliveries).map(g => ({
+    ...g,
+    allDone: g.deliveries.every(d => !isActive(d.status)),
+  })).sort(
+    (a, b) => parseSlot(a.earliestSlot) - parseSlot(b.earliestSlot) || a.name.localeCompare(b.name),
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Stock badge
+// Helper: is this delivery's shortage already covered by a pending request?
+//
+//  Rule 1 — delivery_id match: request was linked directly to this delivery
+//  Rule 2 — product coverage: every shortage product_id appears in a pending
+//            request's items (handles "Request All" from the top banner)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const StockBadge: React.FC<{ check: DeliveryStockCheck }> = ({ check }) => {
+function isDeliveryAlreadyRequested(
+  delivery: DriverDelivery,
+  check: DeliveryStockCheck,
+  pendingDeliveryIds: Set<string>,
+  pendingProductIds: Set<string>,
+): boolean {
+  if (pendingDeliveryIds.has(delivery.id)) return true;
+
+  if (check.status === 'none' || check.status === 'partial') {
+    const shortageIds = check.itemChecks
+      .filter(c => c.available_qty < c.ordered_qty)
+      .map(c => c.product_id);
+    if (shortageIds.length > 0 && shortageIds.every(id => pendingProductIds.has(id))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status pill
+// ─────────────────────────────────────────────────────────────────────────────
+
+const StatusPill: React.FC<{ status: string }> = ({ status }) => {
+  const c = STATUS_CFG[status];
+  if (!c) return <span className="text-[10px] border rounded-full px-2 py-0.5">{status}</span>;
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 border rounded-full text-[10px] font-bold px-2.5 py-0.5 shrink-0', c.pill)}>
+      <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', c.dot)} />
+      {c.label}
+    </span>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StockBadge — shows "Requested ✓" when alreadyRequested=true
+// ─────────────────────────────────────────────────────────────────────────────
+
+const StockBadge: React.FC<{
+  check:            DeliveryStockCheck;
+  onRequest:        () => void;
+  alreadyRequested: boolean;
+}> = ({ check, onRequest, alreadyRequested }) => {
   if (check.status === 'unknown' || check.status === 'full') return null;
   const missingItems = check.itemChecks.filter(c => c.available_qty < c.ordered_qty);
 
   if (check.status === 'none') {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-xl dark:bg-red-950/30 dark:border-red-900 mt-2">
-        <PackageX className="h-3.5 w-3.5 text-red-500 shrink-0" />
-        <p className="text-[11px] font-bold text-red-700 dark:text-red-300">
-          Stock not on van — request top-up
-        </p>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl dark:bg-red-950/30 dark:border-red-900 mt-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <PackageX className="h-3.5 w-3.5 text-red-500 shrink-0" />
+          <p className="text-[11px] font-bold text-red-700 dark:text-red-300 truncate">
+            Stock not on van
+          </p>
+        </div>
+        {alreadyRequested ? (
+          <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 dark:text-emerald-400">
+            <CheckCircle2 className="h-3 w-3" />Requested
+          </span>
+        ) : (
+          <button
+            onClick={onRequest}
+            className="shrink-0 text-[10px] font-black text-red-600 underline underline-offset-2 hover:text-red-700 dark:text-red-400"
+          >
+            Request →
+          </button>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex items-start gap-1.5 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-900 mt-2">
-      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
-      <div>
-        <p className="text-[11px] font-bold text-amber-700 dark:text-amber-300">Partial stock only</p>
-        <div className="mt-0.5 space-y-0.5">
-          {missingItems.map(item => (
-            <p key={item.product_id} className="text-[10px] text-amber-600 dark:text-amber-400">
-              {item.product_name}: {item.available_qty}/{item.ordered_qty} available
-            </p>
-          ))}
+    <div className="flex items-start justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl dark:bg-amber-950/30 dark:border-amber-900 mt-2">
+      <div className="flex items-start gap-1.5 min-w-0">
+        <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-amber-700 dark:text-amber-300">Partial stock</p>
+          <div className="mt-0.5 space-y-0.5">
+            {missingItems.map(item => (
+              <p key={item.product_id} className="text-[10px] text-amber-600 dark:text-amber-400">
+                {item.product_name}: {item.available_qty}/{item.ordered_qty}
+              </p>
+            ))}
+          </div>
         </div>
       </div>
+      {alreadyRequested ? (
+        <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="h-3 w-3" />Requested
+        </span>
+      ) : (
+        <button
+          onClick={onRequest}
+          className="shrink-0 mt-0.5 text-[10px] font-black text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-400"
+        >
+          Request →
+        </button>
+      )}
     </div>
   );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Complete button (stock-aware)
+// CompleteButton — replaces Request button with "Requested ✓" when already sent
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CompleteButton: React.FC<{
-  check:      DeliveryStockCheck;
-  onComplete: () => void;
-  size?:      'sm' | 'md';
-}> = ({ check, onComplete, size = 'md' }) => {
-  const h    = size === 'sm' ? 'h-9 px-3.5 text-[12px]' : 'h-10 px-4 text-[13px]';
-  const icon = 'h-3.5 w-3.5';
+  check:            DeliveryStockCheck;
+  onComplete:       () => void;
+  onRequest:        () => void;
+  alreadyRequested: boolean;
+  size?:            'sm' | 'md';
+}> = ({ check, onComplete, onRequest, alreadyRequested, size = 'md' }) => {
+  const h    = size === 'sm' ? 'h-9 px-3 text-[11px]' : 'h-10 px-4 text-[13px]';
+  const icon = size === 'sm' ? 'h-3 w-3' : 'h-3.5 w-3.5';
+
+  const RequestedBadge = (
+    <span className={cn(
+      'inline-flex items-center gap-1.5 rounded-xl font-bold border',
+      'bg-emerald-50 text-emerald-700 border-emerald-200',
+      'dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800',
+      h,
+    )}>
+      <CheckCircle2 className={icon} />
+      Requested
+    </span>
+  );
 
   if (check.status === 'none') {
-    return (
-      <div className={cn(
-        'flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 text-red-500',
-        'dark:bg-red-950/30 dark:border-red-900 dark:text-red-400',
-        h,
-      )}>
-        <PackageX className={icon} />
-        No stock
-      </div>
+    return alreadyRequested ? RequestedBadge : (
+      <button
+        onClick={onRequest}
+        className={cn(
+          'flex items-center gap-1.5 rounded-xl font-bold text-white transition-all active:scale-[0.97]',
+          'bg-red-500 hover:bg-red-600 border border-red-600 shadow-sm shadow-red-500/20',
+          h,
+        )}
+      >
+        <PackagePlus className={icon} />
+        Request Stock
+      </button>
     );
   }
 
   if (check.status === 'partial') {
     return (
-      <button
-        onClick={onComplete}
-        className={cn(
-          'flex items-center gap-1.5 rounded-xl font-bold text-white transition-all active:scale-[0.97]',
-          'bg-amber-500 hover:bg-amber-600 border border-amber-600 shadow-sm shadow-amber-500/20',
-          h,
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={onComplete}
+          className={cn(
+            'flex items-center gap-1.5 rounded-xl font-bold text-white transition-all active:scale-[0.97]',
+            'bg-amber-500 hover:bg-amber-600 border border-amber-600 shadow-sm shadow-amber-500/20',
+            h,
+          )}
+        >
+          <AlertTriangle className={icon} />
+          Complete
+        </button>
+        {alreadyRequested ? RequestedBadge : (
+          <button
+            onClick={onRequest}
+            className={cn(
+              'flex items-center gap-1.5 rounded-xl font-bold transition-all active:scale-[0.97]',
+              'border border-amber-300 bg-amber-50 text-amber-700',
+              'hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300',
+              h,
+            )}
+          >
+            <PackagePlus className={icon} />
+            Request
+          </button>
         )}
-      >
-        <AlertTriangle className={icon} />
-        Complete Available
-      </button>
+      </div>
     );
   }
 
@@ -222,46 +459,18 @@ const CompleteButton: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function isActive(s: string) { return ACTIVE_STATUSES.includes(s); }
-
-function buildPageGroups(deliveries: DriverDelivery[]): CustomerGroup[] {
-  return buildGroups(deliveries).map(g => ({
-    ...g,
-    allDone: g.deliveries.every(d => !isActive(d.status)),
-  })).sort(
-    (a, b) => parseSlot(a.earliestSlot) - parseSlot(b.earliestSlot) || a.name.localeCompare(b.name),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Status pill
-// ─────────────────────────────────────────────────────────────────────────────
-
-const StatusPill: React.FC<{ status: string }> = ({ status }) => {
-  const c = STATUS_CFG[status];
-  if (!c) return <span className="text-[10px] border rounded-full px-2 py-0.5">{status}</span>;
-  return (
-    <span className={cn('inline-flex items-center gap-1.5 border rounded-full text-[10px] font-bold px-2.5 py-0.5 shrink-0', c.pill)}>
-      <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', c.dot)} />
-      {c.label}
-    </span>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Delivery row
+// Delivery row (inside expanded group)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DeliveryRow: React.FC<{
-  delivery:   DriverDelivery;
-  isNext:     boolean;
-  stockCheck: DeliveryStockCheck;
-  onComplete: (d: DriverDelivery) => void;
-  onReload:   () => void;
-}> = ({ delivery, isNext, stockCheck, onComplete, onReload }) => {
+  delivery:         DriverDelivery;
+  isNext:           boolean;
+  stockCheck:       DeliveryStockCheck;
+  alreadyRequested: boolean;
+  onComplete:       (d: DriverDelivery) => void;
+  onRequest:        (d: DriverDelivery) => void;
+  onReload:         () => void;
+}> = ({ delivery, isNext, stockCheck, alreadyRequested, onComplete, onRequest, onReload }) => {
   const c = STATUS_CFG[delivery.status] ?? {
     stripe: 'bg-border', dot: 'bg-muted-foreground',
     pill: 'bg-muted text-muted-foreground border-border', label: delivery.status,
@@ -308,10 +517,15 @@ const DeliveryRow: React.FC<{
         </div>
       )}
 
-      {active && <StockBadge check={stockCheck} />}
+      {active && (
+        <StockBadge
+          check={stockCheck}
+          alreadyRequested={alreadyRequested}
+          onRequest={() => onRequest(delivery)}
+        />
+      )}
 
-      {/* Action row — good touch targets */}
-      <div className="flex gap-2 mt-3">
+      <div className="flex gap-2 mt-3 flex-wrap">
         <button
           onClick={() => window.open(`tel:${delivery.customer_phone}`)}
           className="h-10 px-3.5 flex items-center gap-1.5 rounded-xl border border-border/60 bg-muted/30 text-[12px] font-semibold hover:bg-muted transition-colors active:scale-[0.97]"
@@ -335,7 +549,9 @@ const DeliveryRow: React.FC<{
         ) : active ? (
           <CompleteButton
             check={stockCheck}
+            alreadyRequested={alreadyRequested}
             onComplete={() => onComplete(delivery)}
+            onRequest={() => onRequest(delivery)}
             size="sm"
           />
         ) : null}
@@ -343,7 +559,7 @@ const DeliveryRow: React.FC<{
 
       {active && stockCheck.status === 'partial' && (
         <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1.5 italic">
-          Only items currently on your van will be recorded as delivered.
+          Only items on your van will be recorded as delivered.
         </p>
       )}
     </div>
@@ -351,61 +567,29 @@ const DeliveryRow: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Aggregate group stock
-// ─────────────────────────────────────────────────────────────────────────────
-
-function aggregateGroupStock(
-  group: CustomerGroup,
-  bottleMap: Map<string, number>,
-  consumableMap: Map<string, number>,
-): DeliveryStockCheck {
-  const activeDeliveries = group.deliveries.filter(d => isActive(d.status));
-  if (activeDeliveries.length === 0) return { status: 'full', itemChecks: [] };
-
-  const checks = activeDeliveries.map(d => checkDeliveryStock(d, bottleMap, consumableMap));
-  if (checks.some(c => c.status === 'unknown')) return { status: 'unknown', itemChecks: [] };
-
-  const merged = new Map<string, ItemStockStatus>();
-  for (const chk of checks) {
-    for (const item of chk.itemChecks) {
-      const existing = merged.get(item.product_id);
-      if (existing) {
-        merged.set(item.product_id, {
-          ...existing,
-          ordered_qty: existing.ordered_qty + item.ordered_qty,
-          available_qty: item.available_qty,
-        });
-      } else {
-        merged.set(item.product_id, { ...item });
-      }
-    }
-  }
-
-  const itemChecks = Array.from(merged.values());
-  const anyAvailable = itemChecks.some(c => c.available_qty > 0);
-  const allFull      = itemChecks.every(c => c.available_qty >= c.ordered_qty);
-  const status: DeliveryStockStatus = allFull ? 'full' : anyAvailable ? 'partial' : 'none';
-
-  return { status, itemChecks };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Customer group card
+// CustomerGroupCard
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CustomerGroupCard: React.FC<{
-  group:         CustomerGroup;
-  nextId:        string | undefined;
-  bottleMap:     Map<string, number>;
-  consumableMap: Map<string, number>;
-  onSingle:      (d: DriverDelivery) => void;
-  onBulk:        (g: CustomerGroup)  => void;
-  onReload:      () => void;
-}> = ({ group, nextId, bottleMap, consumableMap, onSingle, onBulk, onReload }) => {
+  group:              CustomerGroup;
+  nextId:             string | undefined;
+  bottleMap:          Map<string, number>;
+  consumableMap:      Map<string, number>;
+  pendingDeliveryIds: Set<string>;
+  pendingProductIds:  Set<string>;
+  onSingle:           (d: DriverDelivery) => void;
+  onBulk:             (g: CustomerGroup)  => void;
+  onRequest:          (items: StockRequestItem[], deliveryId?: string, orderNumber?: string) => void;
+  onReload:           () => void;
+}> = ({
+  group, nextId, bottleMap, consumableMap,
+  pendingDeliveryIds, pendingProductIds,
+  onSingle, onBulk, onRequest, onReload,
+}) => {
   const [expanded, setExpanded] = useState(false);
-  const single   = group.deliveries.length === 1;
-  const d0       = group.deliveries[0];
-  const allDone  = group.allDone ?? false;
+  const single  = group.deliveries.length === 1;
+  const d0      = group.deliveries[0];
+  const allDone = group.allDone ?? false;
 
   const deliveryStockChecks = useMemo(() => {
     const map = new Map<string, DeliveryStockCheck>();
@@ -424,11 +608,33 @@ const CustomerGroupCard: React.FC<{
     ? (deliveryStockChecks.get(d0.id) ?? { status: 'unknown', itemChecks: [] })
     : groupStockCheck;
 
+  // Group alreadyRequested = all active deliveries are covered
+  const groupAlreadyRequested = useMemo(() => {
+    const activeDeliveries = group.deliveries.filter(d => isActive(d.status));
+    if (activeDeliveries.length === 0) return false;
+    return activeDeliveries.every(d => {
+      const check = deliveryStockChecks.get(d.id) ?? { status: 'unknown', itemChecks: [] };
+      return isDeliveryAlreadyRequested(d, check, pendingDeliveryIds, pendingProductIds);
+    });
+  }, [group.deliveries, deliveryStockChecks, pendingDeliveryIds, pendingProductIds]);
+
   const accentColor =
     allDone                          ? 'bg-emerald-500' :
     singleCheck.status === 'none'    ? 'bg-red-400'     :
     singleCheck.status === 'partial' ? 'bg-amber-400'   :
     single                           ? 'bg-sky-500'     : 'bg-primary';
+
+  const handleGroupRequest = () => {
+    if (single) {
+      const items = buildStockRequestFromDelivery(d0, bottleMap, consumableMap);
+      onRequest(items, d0.id, d0.order_number);
+    } else {
+      const allItems = buildStockRequestFromDeliveries(group.deliveries, bottleMap, consumableMap);
+      onRequest(allItems);
+    }
+  };
+
+  const hasStockIssue = singleCheck.status === 'none' || singleCheck.status === 'partial';
 
   return (
     <div className={cn(
@@ -445,7 +651,7 @@ const CustomerGroupCard: React.FC<{
     )}>
       <div className={cn('h-[3px] w-full', accentColor)} />
 
-      {/* Card header */}
+      {/* Header */}
       <div className="flex items-center gap-0 px-4 py-3.5">
         <button
           onClick={() => {
@@ -469,6 +675,12 @@ const CustomerGroupCard: React.FC<{
             {!allDone && singleCheck.status === 'partial' && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20 rounded-full px-2 py-0.5">
                 <AlertTriangle className="h-2.5 w-2.5" />Partial
+              </span>
+            )}
+            {/* Show "Requested ✓" badge on the card header when already sent */}
+            {!allDone && hasStockIssue && groupAlreadyRequested && (
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5">
+                <CheckCircle2 className="h-2.5 w-2.5" />Requested
               </span>
             )}
           </div>
@@ -508,9 +720,11 @@ const CustomerGroupCard: React.FC<{
           ) : !allDone ? (
             <CompleteButton
               check={single ? singleCheck : groupStockCheck}
+              alreadyRequested={groupAlreadyRequested}
               onComplete={() => {
                 if (single) { onSingle(d0); } else { onBulk(group); }
               }}
+              onRequest={handleGroupRequest}
             />
           ) : null}
           {!single && (
@@ -535,16 +749,25 @@ const CustomerGroupCard: React.FC<{
 
       {!single && expanded && (
         <div className="border-t border-border/30 divide-y divide-border/20">
-          {group.deliveries.map(d => (
-            <DeliveryRow
-              key={d.id}
-              delivery={d}
-              isNext={nextId === d.id}
-              stockCheck={deliveryStockChecks.get(d.id) ?? { status: 'unknown', itemChecks: [] }}
-              onComplete={onSingle}
-              onReload={onReload}
-            />
-          ))}
+          {group.deliveries.map(d => {
+            const check = deliveryStockChecks.get(d.id) ?? { status: 'unknown', itemChecks: [] };
+            const alreadyReq = isDeliveryAlreadyRequested(d, check, pendingDeliveryIds, pendingProductIds);
+            return (
+              <DeliveryRow
+                key={d.id}
+                delivery={d}
+                isNext={nextId === d.id}
+                stockCheck={check}
+                alreadyRequested={alreadyReq}
+                onComplete={onSingle}
+                onRequest={delivery => {
+                  const items = buildStockRequestFromDelivery(delivery, bottleMap, consumableMap);
+                  onRequest(items, delivery.id, delivery.order_number);
+                }}
+                onReload={onReload}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -552,14 +775,16 @@ const CustomerGroupCard: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quick Action Bar
+// QuickActionBar
 // ─────────────────────────────────────────────────────────────────────────────
 
 const QuickActionBar: React.FC<{
-  onComplete: () => void;
-  onSale:     () => void;
-}> = ({ onComplete, onSale }) => (
-  <div className="grid grid-cols-2 gap-3 mb-5">
+  onComplete:  () => void;
+  onSale:      () => void;
+  onRequest:   () => void;
+  hasShortage: boolean;
+}> = ({ onComplete, onSale, onRequest, hasShortage }) => (
+  <div className={cn('grid gap-3 mb-5', hasShortage ? 'grid-cols-3' : 'grid-cols-2')}>
     <button
       onClick={onComplete}
       className={cn(
@@ -570,8 +795,9 @@ const QuickActionBar: React.FC<{
       )}
     >
       <CheckCircle2 className="h-4 w-4 shrink-0" />
-      Complete Delivery
+      <span className="truncate">Complete</span>
     </button>
+
     <button
       onClick={onSale}
       className={cn(
@@ -582,19 +808,41 @@ const QuickActionBar: React.FC<{
       )}
     >
       <ShoppingCart className="h-4 w-4 shrink-0" />
-      Direct Sale
+      <span className="truncate">Direct Sale</span>
     </button>
+
+    {hasShortage && (
+      <button
+        onClick={onRequest}
+        className={cn(
+          'flex items-center justify-center gap-2 h-12 rounded-2xl',
+          'bg-red-500 hover:bg-red-600 active:scale-[0.97]',
+          'text-white text-[13px] font-bold border border-red-600',
+          'shadow-sm shadow-red-500/20 transition-all',
+        )}
+      >
+        <PackagePlus className="h-4 w-4 shrink-0" />
+        <span className="truncate">Request Stock</span>
+      </button>
+    )}
   </div>
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dialog state type
+// Dialog state types
 // ─────────────────────────────────────────────────────────────────────────────
 
 type CompleteTarget =
   | { mode: 'list' }
   | { mode: 'single'; delivery: DriverDelivery; stockCheck: DeliveryStockCheck }
   | { mode: 'bulk';   group: CustomerGroup;     stockCheck: DeliveryStockCheck };
+
+interface StockRequestState {
+  open:         boolean;
+  prefillItems: StockRequestItem[];
+  deliveryId?:  string;
+  orderNumber?: string;
+}
 
 type SortKey = 'time' | 'name';
 type TabKey  = 'active' | 'done';
@@ -607,24 +855,34 @@ export const DeliveryQueuePage: React.FC = () => {
   const [deliveries,  setDeliveries]  = useState<DriverDelivery[]>([]);
   const [bottles,     setBottles]     = useState<DriverBottleStock[]>([]);
   const [consumables, setConsumables] = useState<DriverConsumableStock[]>([]);
+  const [myRequests,  setMyRequests]  = useState<StockRequest[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [tab,         setTab]         = useState<TabKey>('active');
   const [search,      setSearch]      = useState('');
   const [sortKey,     setSortKey]     = useState<SortKey>('time');
   const [saleOpen,    setSaleOpen]    = useState(false);
+
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
+  const [stockReqState,  setStockReqState]  = useState<StockRequestState>({
+    open: false, prefillItems: [],
+  });
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [data, b, c] = await Promise.all([
+      const [data, b, c, myReqs] = await Promise.all([
         deliveryService.getDriverDeliveries(),
         driverStoreService.getBottleStock(),
         driverStoreService.getConsumableStock(),
+        // Silently ignore failures — duplicate-prevention is best-effort
+        stockRequestService.getMyRequests().catch(() => [] as StockRequest[]),
       ]);
       setDeliveries(data.deliveries || []);
       setBottles(b);
       setConsumables(c);
+      setMyRequests(myReqs.filter((r: StockRequest) => r.status === 'PENDING'));
     } catch {
       toast.error('Failed to load deliveries');
     } finally {
@@ -637,17 +895,90 @@ export const DeliveryQueuePage: React.FC = () => {
   const handleDone = useCallback(() => {
     setCompleteTarget(null);
     setSaleOpen(false);
+    setStockReqState({ open: false, prefillItems: [] });
     load();
   }, [load]);
 
-  const bottleMap     = useMemo(() => buildBottleMap(bottles),      [bottles]);
+  // ── Derived maps ───────────────────────────────────────────────────────────
+
+  const bottleMap     = useMemo(() => buildBottleMap(bottles),         [bottles]);
   const consumableMap = useMemo(() => buildConsumableMap(consumables), [consumables]);
+
+  // ── Pending-request lookup sets ────────────────────────────────────────────
+
+  /** Delivery IDs that already have a directly linked PENDING request */
+  const pendingDeliveryIds = useMemo(
+    () => new Set(myRequests.filter(r => r.delivery_id).map(r => r.delivery_id!)),
+    [myRequests],
+  );
+
+  /** Product IDs covered by any PENDING request's line items */
+  const pendingProductIds = useMemo(
+    () => new Set(myRequests.flatMap(r => r.items.map(i => i.product_id))),
+    [myRequests],
+  );
+
+  // ── Stock request opener (with duplicate guard) ────────────────────────────
+
+  const openStockRequest = useCallback((
+    items?: StockRequestItem[],
+    deliveryId?: string,
+    orderNumber?: string,
+  ) => {
+    const prefill = items ?? buildStockRequestFromDeliveries(deliveries, bottleMap, consumableMap);
+
+    if (prefill.length === 0) {
+      toast.success('No stock shortages found — your van is fully loaded!');
+      return;
+    }
+
+    // For "Request All" / QuickAction paths (no specific deliveryId),
+    // filter out products already covered by a pending request.
+    // Per-delivery requests keep all items so the driver can still see context.
+    const filtered = deliveryId
+      ? prefill
+      : prefill.filter(item => !pendingProductIds.has(item.product_id));
+
+    if (filtered.length === 0) {
+      toast.info('All shortages already have a pending request — nothing new to send.');
+      return;
+    }
+
+    setStockReqState({ open: true, prefillItems: filtered, deliveryId, orderNumber });
+  }, [deliveries, bottleMap, consumableMap, pendingProductIds]);
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
 
   const activeCount    = deliveries.filter(d => isActive(d.status)).length;
   const completedCount = deliveries.filter(d => d.status === 'COMPLETED').length;
   const failedCount    = deliveries.filter(d => d.status === 'FAILED').length;
   const totalItems     = deliveries.reduce((s, d) => s + (d.items_count || 0), 0);
-  const rate           = deliveries.length ? Math.round((completedCount / deliveries.length) * 100) : 0;
+  const rate           = deliveries.length
+    ? Math.round((completedCount / deliveries.length) * 100) : 0;
+
+  const routeHasShortage = useMemo(() => {
+    return deliveries.some(d => {
+      if (!isActive(d.status)) return false;
+      const check = checkDeliveryStock(d, bottleMap, consumableMap);
+      return check.status === 'none' || check.status === 'partial';
+    });
+  }, [deliveries, bottleMap, consumableMap]);
+
+  // True when every shortage delivery already has a pending request
+  const allShortagesRequested = useMemo(() => {
+    const shortageDeliveries = deliveries.filter(d => {
+      if (!isActive(d.status)) return false;
+      const check = checkDeliveryStock(d, bottleMap, consumableMap);
+      return check.status === 'none' || check.status === 'partial';
+    });
+    if (shortageDeliveries.length === 0) return false;
+    return shortageDeliveries.every(d => {
+      const check = checkDeliveryStock(d, bottleMap, consumableMap);
+      return isDeliveryAlreadyRequested(d, check, pendingDeliveryIds, pendingProductIds);
+    });
+  }, [deliveries, bottleMap, consumableMap, pendingDeliveryIds, pendingProductIds]);
+
+  // ── Filtered / sorted groups ───────────────────────────────────────────────
 
   const groups = useMemo(() => {
     let list = deliveries.filter(d =>
@@ -662,8 +993,9 @@ export const DeliveryQueuePage: React.FC = () => {
       );
     }
     const gs = buildPageGroups(list);
-    if (sortKey === 'name') return [...gs].sort((a, b) => a.name.localeCompare(b.name));
-    return gs;
+    return sortKey === 'name'
+      ? [...gs].sort((a, b) => a.name.localeCompare(b.name))
+      : gs;
   }, [deliveries, tab, search, sortKey]);
 
   const nextDelivery = deliveries.find(d => d.status === 'ACCEPTED');
@@ -671,10 +1003,12 @@ export const DeliveryQueuePage: React.FC = () => {
   const totalShown   = groups.reduce((s, g) => s + g.deliveries.length, 0);
 
   const completeDialogOpen      = completeTarget !== null;
-  const completeInitialDelivery = completeTarget?.mode === 'single' ? completeTarget.delivery   : undefined;
-  const completeInitialGroup    = completeTarget?.mode === 'bulk'   ? completeTarget.group       : undefined;
+  const completeInitialDelivery = completeTarget?.mode === 'single' ? completeTarget.delivery : undefined;
+  const completeInitialGroup    = completeTarget?.mode === 'bulk'   ? completeTarget.group    : undefined;
   const completeStockCheck      = (completeTarget?.mode === 'single' || completeTarget?.mode === 'bulk')
     ? completeTarget.stockCheck : undefined;
+
+  // ── Loading state ──────────────────────────────────────────────────────────
 
   if (loading) return (
     <DriverLayout title="Deliveries" subtitle="Loading…">
@@ -684,10 +1018,12 @@ export const DeliveryQueuePage: React.FC = () => {
     </DriverLayout>
   );
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <DriverLayout title="Deliveries" subtitle="Your route for today">
 
-      {/* Stats — 2x2 grid on small screens, 4 cols on md+ */}
+      {/* Stats strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
         {([
           { label: 'Active', val: activeCount,    cls: 'bg-blue-50    text-blue-700    border-blue-200/60    dark:bg-blue-950/30    dark:text-blue-300    dark:border-blue-900'    },
@@ -714,11 +1050,16 @@ export const DeliveryQueuePage: React.FC = () => {
           </div>
           <div className="h-2.5 rounded-full bg-muted overflow-hidden">
             <div
-              className={cn('h-full rounded-full transition-all duration-700', rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-blue-500')}
+              className={cn(
+                'h-full rounded-full transition-all duration-700',
+                rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-blue-500',
+              )}
               style={{ width: `${rate}%` }}
             />
           </div>
-          <p className="text-[11px] text-muted-foreground mt-1.5">{completedCount} of {deliveries.length} delivered</p>
+          <p className="text-[11px] text-muted-foreground mt-1.5">
+            {completedCount} of {deliveries.length} delivered
+          </p>
         </div>
       )}
 
@@ -726,7 +1067,54 @@ export const DeliveryQueuePage: React.FC = () => {
       <QuickActionBar
         onComplete={() => setCompleteTarget({ mode: 'list' })}
         onSale={() => setSaleOpen(true)}
+        onRequest={() => openStockRequest()}
+        hasShortage={routeHasShortage}
       />
+
+      {/* Shortage banner — flips to green when all shortages are already requested */}
+      {routeHasShortage && tab === 'active' && (
+        <div className={cn(
+          'flex items-center gap-3 px-4 py-3 rounded-2xl mb-4 border',
+          allShortagesRequested
+            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900'
+            : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900',
+        )}>
+          {allShortagesRequested
+            ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+            : <PackageX className="h-5 w-5 text-red-500 shrink-0" />
+          }
+          <div className="flex-1 min-w-0">
+            <p className={cn(
+              'text-sm font-bold',
+              allShortagesRequested
+                ? 'text-emerald-700 dark:text-emerald-300'
+                : 'text-red-700 dark:text-red-300',
+            )}>
+              {allShortagesRequested ? 'Stock requests sent' : 'Stock shortages on route'}
+            </p>
+            <p className={cn(
+              'text-xs mt-0.5',
+              allShortagesRequested
+                ? 'text-emerald-600/80 dark:text-emerald-400'
+                : 'text-red-600/80 dark:text-red-400',
+            )}>
+              {allShortagesRequested
+                ? 'All shortages have pending requests — waiting for store approval.'
+                : 'Some deliveries need more stock loaded onto your van.'
+              }
+            </p>
+          </div>
+          {/* Hide "Request All" once everything is already requested */}
+          {!allShortagesRequested && (
+            <button
+              onClick={() => openStockRequest()}
+              className="shrink-0 h-9 px-3.5 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors active:scale-[0.97]"
+            >
+              Request All
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1.5 mb-4 bg-muted/40 p-1 rounded-2xl">
@@ -766,7 +1154,10 @@ export const DeliveryQueuePage: React.FC = () => {
             className="w-full h-12 pl-10 pr-10 rounded-xl border border-border/60 bg-muted/30 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
               <X className="h-4 w-4" />
             </button>
           )}
@@ -797,11 +1188,15 @@ export const DeliveryQueuePage: React.FC = () => {
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-muted-foreground">
           <strong>{totalGroups}</strong> customer{totalGroups !== 1 ? 's' : ''}
-          {totalShown !== totalGroups && <span className="ml-1">· <strong>{totalShown}</strong> deliveries</span>}
+          {totalShown !== totalGroups && (
+            <span className="ml-1">· <strong>{totalShown}</strong> deliveries</span>
+          )}
           {search && <span className="ml-1">for "<strong>{search}</strong>"</span>}
         </p>
         {search && (
-          <button onClick={() => setSearch('')} className="text-[11px] text-primary underline underline-offset-2">Clear</button>
+          <button onClick={() => setSearch('')} className="text-[11px] text-primary underline underline-offset-2">
+            Clear
+          </button>
         )}
       </div>
 
@@ -813,7 +1208,10 @@ export const DeliveryQueuePage: React.FC = () => {
           </div>
           <p className="font-bold text-base mb-1">No deliveries found</p>
           <p className="text-sm text-muted-foreground">
-            {search ? 'Try a different search term.' : `No ${tab === 'active' ? 'active' : 'completed'} deliveries.`}
+            {search
+              ? 'Try a different search term.'
+              : `No ${tab === 'active' ? 'active' : 'completed'} deliveries.`
+            }
           </p>
         </div>
       ) : (
@@ -825,6 +1223,8 @@ export const DeliveryQueuePage: React.FC = () => {
               nextId={nextDelivery?.id}
               bottleMap={bottleMap}
               consumableMap={consumableMap}
+              pendingDeliveryIds={pendingDeliveryIds}
+              pendingProductIds={pendingProductIds}
               onSingle={d => {
                 const check = checkDeliveryStock(d, bottleMap, consumableMap);
                 setCompleteTarget({ mode: 'single', delivery: d, stockCheck: check });
@@ -833,6 +1233,9 @@ export const DeliveryQueuePage: React.FC = () => {
                 const check = aggregateGroupStock(g, bottleMap, consumableMap);
                 setCompleteTarget({ mode: 'bulk', group: g, stockCheck: check });
               }}
+              onRequest={(items, deliveryId, orderNumber) =>
+                openStockRequest(items, deliveryId, orderNumber)
+              }
               onReload={load}
             />
           ))}
@@ -842,6 +1245,7 @@ export const DeliveryQueuePage: React.FC = () => {
         </div>
       )}
 
+      {/* Complete delivery dialog */}
       <CompleteDeliveryDialog
         open={completeDialogOpen}
         onClose={() => setCompleteTarget(null)}
@@ -851,12 +1255,22 @@ export const DeliveryQueuePage: React.FC = () => {
         stockCheck={completeStockCheck}
       />
 
+      {/* Direct sale dialog */}
       <DirectSaleDialog
         open={saleOpen}
         onClose={() => setSaleOpen(false)}
         onDone={handleDone}
         bottles={bottles}
         consumables={consumables}
+      />
+
+      {/* Stock request dialog */}
+      <StockRequestDialog
+        open={stockReqState.open}
+        onClose={() => setStockReqState(s => ({ ...s, open: false }))}
+        prefillItems={stockReqState.prefillItems}
+        deliveryId={stockReqState.deliveryId}
+        deliveryOrderNumber={stockReqState.orderNumber}
       />
     </DriverLayout>
   );

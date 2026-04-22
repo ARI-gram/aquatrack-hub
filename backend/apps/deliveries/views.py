@@ -839,18 +839,37 @@ class DriverCompleteDeliveryView(APIView):
         # ── Bottle exchange ───────────────────────────────────────────────────
         if delivery.order.bottle_exchange:
             from apps.products.models import BottleMovement as _BM
+            from django.db.models import Sum as _Sum
             exchange = delivery.order.bottle_exchange
             bottles_delivered_count = data.get('bottles_delivered') or 0
-            bottles_collected_count = data.get(
-                'bottles_collected') or 0  # default 0, never None
+
+            # If driver explicitly sent bottles_collected, use it.
+            # Otherwise default to the total returnable qty on the order
+            # (they delivered X bottles → X empties expected back).
+            raw_collected = data.get('bottles_collected')
+            if raw_collected is not None:
+                bottles_collected_count = int(raw_collected)
+            else:
+                bottles_collected_count = (
+                    delivery.order.items
+                    .filter(product__is_returnable=True)
+                    .aggregate(t=_Sum('quantity'))['t'] or 0
+                )
+
+            # If bottles_delivered_count was also not sent, fall back to
+            # the order's returnable qty too
+            if not bottles_delivered_count:
+                bottles_delivered_count = (
+                    delivery.order.items
+                    .filter(product__is_returnable=True)
+                    .aggregate(t=_Sum('quantity'))['t'] or 0
+                )
 
             exchange.bottles_delivered = bottles_delivered_count
             exchange.bottles_collected = bottles_collected_count
             exchange.exchange_confirmed = True
             exchange.save()
 
-            # Always write RECEIVE_EMPTY — even qty_good=0 creates an audit trail
-            # so the audit and van stock screens always have a record to read from
             returnable_item = (
                 delivery.order.items
                 .select_related('product')
@@ -869,8 +888,7 @@ class DriverCompleteDeliveryView(APIView):
                                     bottles_collected_count),
                     notes=f'Empties collected on delivery completion (order {delivery.order.order_number})',
                     # recorded_by=None → driver-side, counts toward van empty stock
-                )
-        # ── Partial delivery adjustment ───────────────────────────────────────
+                )        # ── Partial delivery adjustment ───────────────────────────────────────
         #
         # Strategy:
         #   1. If the driver supplied per-item `delivered_items[]`, use those.
@@ -920,21 +938,45 @@ class DriverCompleteDeliveryView(APIView):
         notify.order_delivered(delivery.order)
         notify.delivery_completed(delivery)
 
-        # ── Payment collection recording ──────────────────────────────────────
+      # ── Payment collection recording ──────────────────────────────────────
         amount_collected = data.get('amount_collected') or Decimal('0.00')
-        if amount_collected > Decimal('0.00'):
-            try:
-                from decimal import Decimal as _D
-                from apps.invoices.models import Invoice
-                from apps.invoices.signals import _recompute_outstanding
+        payment_method = data.get('payment_method_collected', 'CASH')
 
-                invoice = Invoice.objects.filter(
-                    order=delivery.order,
-                    status__in=['ISSUED', 'OVERDUE'],
-                ).first()
+        try:
+            from decimal import Decimal as _D
+            from apps.invoices.models import Invoice
+            from apps.invoices.signals import _recompute_outstanding
 
-                if invoice:
-                    collected = _D(str(amount_collected))
+            invoice = Invoice.objects.filter(
+                order=delivery.order,
+                status__in=['ISSUED', 'OVERDUE', 'DRAFT'],
+            ).first()
+
+            if invoice:
+                order_payment_method = (
+                    delivery.order.payment_method or ''
+                ).upper()
+
+                # ── M-Pesa / Wallet / Card: prepaid — auto-mark PAID on delivery completion
+                if order_payment_method in ('MPESA', 'WALLET', 'CARD'):
+                    invoice.amount_paid = invoice.total_amount
+                    invoice.amount_due = _D('0.00')
+                    invoice.status = 'PAID'
+                    invoice.paid_at = now
+                    invoice.payment_method = order_payment_method
+                    invoice.save(update_fields=[
+                        'amount_paid', 'amount_due', 'status',
+                        'payment_method', 'paid_at', 'updated_at',
+                    ])
+                    _recompute_outstanding(delivery.order.customer)
+
+                # ── Cash: driver collects at door — use explicit amount or default to full invoice
+                elif order_payment_method == 'CASH':
+                    collected = (
+                        _D(str(amount_collected))
+                        if amount_collected > _D('0.00')
+                        else invoice.total_amount          # assume full payment if nothing sent
+                    )
                     invoice.amount_paid = min(
                         invoice.total_amount,
                         invoice.amount_paid + collected,
@@ -943,8 +985,7 @@ class DriverCompleteDeliveryView(APIView):
                         _D('0.00'),
                         invoice.total_amount - invoice.amount_paid,
                     )
-                    invoice.payment_method = data.get(
-                        'payment_method_collected', 'CASH')
+                    invoice.payment_method = payment_method
                     if invoice.amount_due == _D('0.00'):
                         invoice.status = 'PAID'
                         invoice.paid_at = now
@@ -953,10 +994,14 @@ class DriverCompleteDeliveryView(APIView):
                         'payment_method', 'paid_at', 'updated_at',
                     ])
                     _recompute_outstanding(delivery.order.customer)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning(
-                    'Payment collection recording failed for delivery %s', delivery_id)
+
+                # ── Credit / Invoice: never auto-pay — admin marks paid manually
+                # elif order_payment_method == 'CREDIT': pass
+
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                'Payment recording failed for delivery %s', delivery_id)
 
         # ── Build response ────────────────────────────────────────────────────
         response_data: dict = {

@@ -38,8 +38,10 @@ export type {
   CompleteDeliveryResponse,
   AdjustmentLine,
   DeliveryAdjustment,
-};
+  OrderItem,           
+} from '@/types/delivery.types';
 
+export type { DeliveryDetail as DriverDeliveryDetail } from '@/types/delivery.types';
 export const deliveryService = {
 
   // ── Client ────────────────────────────────────────────────────────────────

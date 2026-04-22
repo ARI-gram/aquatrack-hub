@@ -1,13 +1,3 @@
-/**
- * src/pages/driver/DriverSalesPage.tsx
- * Mobile-first direct sales history
- *
- * Changes in this revision:
- *  - Each sale card now has a "Receipt" button
- *  - Tapping it builds DriverSaleData from the stock movement and opens
- *    DriverSaleReceiptModal — same modal used right after a sale is recorded
- */
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { DriverLayout } from '@/components/layout/DriverLayout';
 import {

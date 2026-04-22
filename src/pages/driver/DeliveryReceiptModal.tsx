@@ -1,17 +1,3 @@
-/**
- * src/components/driver/DeliveryReceiptModal.tsx
- *
- * Receipt modal shown after completing a delivery, or when reissuing.
- * Allows WhatsApp share, print, and PDF download.
- *
- * Layout:
- *   Mobile  (< lg) — bottom sheet sliding up from the bottom
- *   Desktop (≥ lg) — centered dialog with backdrop
- *
- * Fix: removed `lg:hidden` that was preventing the modal from rendering
- * on large screens entirely.
- */
-
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {

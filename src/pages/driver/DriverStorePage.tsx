@@ -1,6 +1,9 @@
 /**
  * src/pages/driver/DriverStorePage.tsx
  * Mobile-first van stock page
+ *
+ * UPDATE: "Request Top-up" button added to header bar and SummaryBanner
+ * shortfall section. Opens StockRequestDialog instead of showing plain text.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -9,7 +12,7 @@ import {
   Droplets, Package, Loader2, RefreshCw,
   AlertTriangle, CheckCircle2,
   ChevronDown, Clock, Layers, ArrowRightLeft,
-  Truck, TrendingDown,
+  Truck, TrendingDown, PackagePlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -22,6 +25,7 @@ import {
   type DriverStockHistory,
 } from '@/api/services/driver-store.service';
 import { ProductImage } from '@/components/dialogs/shared';
+import { StockRequestDialog } from '@/components/dialogs/StockRequestDialog';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -286,7 +290,8 @@ const SummaryBanner: React.FC<{
   bottles:      DriverBottleStock[];
   consumables:  DriverConsumableStock[];
   requirements: DeliveryRequirement[];
-}> = ({ bottles, consumables, requirements }) => {
+  onRequestTopUp: () => void;
+}> = ({ bottles, consumables, requirements, onRequestTopUp }) => {
   const issues = useMemo(() => {
     const out: string[] = [];
     for (const req of requirements) {
@@ -320,7 +325,7 @@ const SummaryBanner: React.FC<{
   return (
     <div className="flex items-start gap-3 px-4 py-4 bg-red-500/5 border border-red-500/20 rounded-2xl mb-5">
       <AlertTriangle className="h-6 w-6 text-red-600 shrink-0 mt-0.5" />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-red-800 dark:text-red-300">Stock shortfall</p>
         <ul className="mt-1.5 space-y-1">
           {issues.map((d, i) => (
@@ -329,7 +334,13 @@ const SummaryBanner: React.FC<{
             </li>
           ))}
         </ul>
-        <p className="text-[11px] text-red-600/70 mt-2">Contact the store to top up.</p>
+        <button
+          onClick={onRequestTopUp}
+          className="mt-2.5 flex items-center gap-1.5 text-[11px] font-bold text-red-700 dark:text-red-300 underline underline-offset-2 hover:no-underline transition-all"
+        >
+          <PackagePlus className="h-3.5 w-3.5 shrink-0" />
+          Request a top-up →
+        </button>
       </div>
     </div>
   );
@@ -347,6 +358,7 @@ const DriverStorePage: React.FC = () => {
   const [isLoading,    setIsLoading]    = useState(true);
   const [activeTab,    setActiveTab]    = useState<'bottles' | 'consumables'>('bottles');
   const [histOpen,     setHistOpen]     = useState(false);
+  const [topUpOpen,    setTopUpOpen]    = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -400,7 +412,7 @@ const DriverStorePage: React.FC = () => {
   return (
     <DriverLayout title="Van Stock" subtitle="Your loaded inventory">
 
-      {/* Header bar — product count + shortfall badge + refresh */}
+      {/* Header bar — product count + shortfall badge + request top-up + refresh */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-muted-foreground">
@@ -413,16 +425,31 @@ const DriverStorePage: React.FC = () => {
             </span>
           )}
         </div>
-        <button
-          onClick={load}
-          className="h-10 w-10 flex items-center justify-center rounded-xl border border-border/60 bg-muted/30 hover:bg-muted transition-colors active:scale-[0.97]"
-        >
-          <RefreshCw className="h-4 w-4 text-muted-foreground" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Request Top-up button in header */}
+          <button
+            onClick={() => setTopUpOpen(true)}
+            className="flex items-center gap-2 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors active:scale-[0.98]"
+          >
+            <PackagePlus className="h-4 w-4" />
+            Request Top-up
+          </button>
+          <button
+            onClick={load}
+            className="h-10 w-10 flex items-center justify-center rounded-xl border border-border/60 bg-muted/30 hover:bg-muted transition-colors active:scale-[0.97]"
+          >
+            <RefreshCw className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
       </div>
 
-      {/* Summary banner */}
-      <SummaryBanner bottles={bottles} consumables={consumables} requirements={requirements} />
+      {/* Summary banner — now includes "Request a top-up" link in shortfall state */}
+      <SummaryBanner
+        bottles={bottles}
+        consumables={consumables}
+        requirements={requirements}
+        onRequestTopUp={() => setTopUpOpen(true)}
+      />
 
       {/* Stock tabs */}
       <div className="flex gap-1.5 mb-4 bg-muted/40 p-1 rounded-2xl">
@@ -516,6 +543,12 @@ const DriverStorePage: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Stock request dialog — auto-populates with low/out items */}
+      <StockRequestDialog
+        open={topUpOpen}
+        onClose={() => setTopUpOpen(false)}
+      />
 
     </DriverLayout>
   );

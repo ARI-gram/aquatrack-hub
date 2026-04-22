@@ -32,6 +32,7 @@ urlpatterns = [
     # ── Notifications (must come BEFORE the broad api/customer/, api/driver/, api/client/ prefixes) ──
     path('api/customer/notifications/', include(customer_notification_urls)),
     path('api/driver/notifications/',   include(driver_notification_urls)),
+    path('api/drivers/', include('apps.deliveries.audit_urls')),
     path('api/client/notifications/',   include(client_notification_urls)),
 
     path('api/customer/',  include('apps.customers.urls')),

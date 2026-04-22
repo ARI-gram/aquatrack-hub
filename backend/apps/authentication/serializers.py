@@ -296,16 +296,14 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
     def save(self):
         from django.conf import settings
-        from django.core.cache import cache
         from django.core.mail import EmailMultiAlternatives
         email = self.validated_data['email']
-        frontend_url = getattr(settings, 'FRONTEND_URL',
-                               'http://localhost:5173')
+        frontend_url = settings.FRONTEND_URL
 
         try:
-            user = User.objects.get(email=email)
+            # ← iexact instead of exact
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
-            # Security: return silently — don't reveal whether email exists
             return
 
         # ── Generate a short-lived token ─────────────────────────────────────
