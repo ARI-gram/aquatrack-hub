@@ -314,9 +314,11 @@ export const customerAdminService = {
   },
 
   async getCustomerInvoices(customerId: string): Promise<CustomerInvoice[]> {
-    const r = await axiosInstance.get<CustomerInvoice[]>(
-      `/customers/${customerId}/invoices/`);
-    return r.data;
+    const r = await axiosInstance.get('/invoices/', {
+      params: { customer_id: customerId, limit: 100 },
+    });
+    // Handle both plain array AND paginated { data: [] } responses
+    return Array.isArray(r.data) ? r.data : (r.data.data ?? r.data.results ?? []);
   },
 
   async getInvoice(invoiceId: string): Promise<CustomerInvoice> {

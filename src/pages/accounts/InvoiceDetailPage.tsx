@@ -207,7 +207,7 @@ export const InvoiceDetailPage: React.FC = () => {
         periodStart:   invoice.periodStart,
         periodEnd:     invoice.periodEnd,
         items: invoice.items.map(item => ({
-          description: item.productName,  // serializer sends productName
+          description: item.productName,
           quantity:    item.quantity,
           unitPrice:   item.unitPrice,
           subtotal:    item.subtotal,
@@ -233,15 +233,17 @@ export const InvoiceDetailPage: React.FC = () => {
     );
   }
 
+  // ── Not found ─────────────────────────────────────────────────────────────
+
   if (!invoice || !settings) {
     return (
       <div className="max-w-2xl mx-auto px-4 pt-10 text-center">
         <p className="text-muted-foreground">Invoice not found.</p>
         <button
-          onClick={() => navigate('/client/accounts/invoices')}
+          onClick={() => navigate(-1)}                         
           className="mt-4 text-sm text-primary underline"
         >
-          Back to invoices
+          Go back
         </button>
       </div>
     );
@@ -255,13 +257,17 @@ export const InvoiceDetailPage: React.FC = () => {
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <AccountsLayout title="Invoice" showBackButton onBack={() => navigate('/client/accounts/invoices')}>
+    <AccountsLayout
+      title="Invoice"
+      showBackButton
+      onBack={() => navigate(-1)}                            
+    >
       <div className="max-w-2xl mx-auto px-4 pt-4 pb-10 space-y-4">
 
         {/* Back + title */}
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/client/accounts/invoices')}
+            onClick={() => navigate(-1)}                     
             className="h-9 w-9 flex items-center justify-center rounded-xl bg-muted/60 hover:bg-muted transition-colors shrink-0"
           >
             <ChevronLeft className="h-5 w-5" />

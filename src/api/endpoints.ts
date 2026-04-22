@@ -77,6 +77,7 @@ export const API_ENDPOINTS = {
     // Public
     TRACK:           (orderNumber: string) => `/track/${orderNumber}/`,
   },
+
   // Customers
   CUSTOMERS: {
     BASE: '/customers/',
@@ -85,6 +86,8 @@ export const API_ENDPOINTS = {
     WALLET: (id: string) => `/customers/${id}/wallet/`,
     TRANSACTIONS: (id: string) => `/customers/${id}/transactions/`,
     ORDERS: (id: string) => `/customers/${id}/orders/`,
+    // FIX: Added for the Bottles tab in CustomerDetailPage
+    BOTTLES: (id: string) => `/customers/${id}/bottles/`,
   },
 
   // Invoices (client-facing, separate from billing)
