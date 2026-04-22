@@ -281,8 +281,8 @@ export const DriverSaleReceiptModal: React.FC<DriverSaleReceiptModalProps> = ({
           </div>
         </div>
 
-        {/* Hidden full template for print/PDF */}
-        <div className="hidden">
+        {/* Off-screen full template for print/PDF */}
+        <div className="absolute -left-[9999px] -top-[9999px] w-[794px] pointer-events-none">
           <InvoiceTemplate
             settings={settings}
             data={templateData}
