@@ -147,17 +147,17 @@ AUTH_USER_MODEL = 'authentication.User'
 # ---------------------------------------------------------------
 # CORS Settings
 # ---------------------------------------------------------------
-_frontend_url = config('FRONTEND_URL', default='http://localhost:8080')
+_frontend_urls = config('FRONTEND_URL', default='http://localhost:8080')
 
 CORS_ALLOWED_ORIGINS = [
-    # pulled from env var (e.g. https://aqua-tracker-hub.netlify.app)
-    _frontend_url,
+    url.strip() for url in _frontend_urls.split(',')
+] + [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
