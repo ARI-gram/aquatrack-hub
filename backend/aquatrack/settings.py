@@ -147,10 +147,10 @@ AUTH_USER_MODEL = 'authentication.User'
 # ---------------------------------------------------------------
 # CORS Settings
 # ---------------------------------------------------------------
-_frontend_urls = config('FRONTEND_URL', default='http://localhost:8080')
+_frontend_url = config('FRONTEND_URL', default='http://localhost:8080')
 
 CORS_ALLOWED_ORIGINS = [
-    url.strip() for url in _frontend_urls.split(',')
+    url.strip() for url in _frontend_url.split(',')
 ] + [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
