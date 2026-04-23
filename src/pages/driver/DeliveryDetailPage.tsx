@@ -664,24 +664,6 @@ export const DeliveryDetailPage: React.FC = () => {
             </button>
           )}
 
-          {/* ── Next status step CTA ───────────────────────────────────────── */}
-          {isInProgress && nextStep && (
-            <button
-              onClick={() => handleStatusUpdate(nextStep.status)}
-              disabled={updating}
-              className={cn(
-                'w-full h-14 rounded-2xl flex items-center justify-center gap-3 font-bold text-base',
-                'bg-primary text-primary-foreground shadow-md shadow-primary/20',
-                'hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50',
-              )}
-            >
-              {updating
-                ? <Loader2 className="h-5 w-5 animate-spin" />
-                : <><ArrowRight className="h-5 w-5" />Mark as {nextStep.label}</>
-              }
-            </button>
-          )}
-
           {/* ── Customer + address ─────────────────────────────────────────── */}
           <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -774,68 +756,6 @@ export const DeliveryDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* ── Progress steps ─────────────────────────────────────────────── */}
-          {isInProgress && (
-            <div className="rounded-2xl border border-border/60 bg-card p-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-4">
-                Progress Steps
-              </h3>
-              <div className="space-y-2">
-                {PROGRESS_STEPS.map((step, i) => {
-                  const { isDone, isCurrent, isNext } = getStepState(step);
-                  const canPress = !isTerminal && isNext && !updating;
-                  return (
-                    <button
-                      key={step.status}
-                      onClick={() => canPress && handleStatusUpdate(step.status)}
-                      disabled={!canPress}
-                      className={cn(
-                        'w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border text-left transition-all',
-                        isDone
-                          ? 'bg-emerald-50 border-emerald-200/60 dark:bg-emerald-950/20 dark:border-emerald-900 cursor-default'
-                          : isCurrent
-                          ? 'bg-primary/8 border-primary/20 cursor-default'
-                          : isNext
-                          ? 'bg-card border-border hover:border-primary/30 hover:bg-primary/5 active:scale-[0.98]'
-                          : 'bg-muted/20 border-border/40 cursor-default opacity-50',
-                      )}
-                    >
-                      <div className={cn(
-                        'h-8 w-8 rounded-full flex items-center justify-center shrink-0 transition-all',
-                        isDone       ? 'bg-emerald-500 text-white'
-                        : isCurrent  ? 'bg-primary text-primary-foreground ring-2 ring-primary/30 ring-offset-2'
-                        : isNext     ? 'bg-muted border-2 border-border'
-                        : 'bg-muted/40',
-                      )}>
-                        {isDone
-                          ? <Check className="h-4 w-4" />
-                          : <span className="text-[11px] font-black">{i + 1}</span>
-                        }
-                      </div>
-                      <span className={cn(
-                        'text-sm font-semibold flex-1',
-                        isDone      ? 'text-emerald-700 dark:text-emerald-400'
-                        : isCurrent ? 'text-primary'
-                        : 'text-foreground',
-                      )}>
-                        {step.label}
-                      </span>
-                      {isDone    && <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />}
-                      {isCurrent && (
-                        <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
-                          Current
-                        </span>
-                      )}
-                      {isNext && !isTerminal && (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* ── Fail delivery ──────────────────────────────────────────────── */}
           {isInProgress && (
             <button
@@ -872,10 +792,16 @@ export const DeliveryDetailPage: React.FC = () => {
         open={completeOpen}
         onClose={() => setCompleteOpen(false)}
         onDone={handleDone}
-        initialDelivery={delivery as unknown as DriverDelivery}
+        initialDelivery={{
+          ...delivery,
+          customer_name:       delivery.customer?.name ?? '',
+          full_address:        delivery.address?.full_address ?? '',
+          order_number:        delivery.order?.order_number ?? '',
+          scheduled_time_slot: delivery.order?.scheduled_time_slot ?? '',
+          items_count:         delivery.order?.items?.length ?? 0,
+        } as unknown as DriverDelivery}
         stockCheck={stockCheck}
       />
-
       {/* ── Stock request dialog ───────────────────────────────────────────── */}
       <StockRequestDialog
         open={stockReqOpen}

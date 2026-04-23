@@ -36,32 +36,51 @@ async function buildPdfFile(
   const html2canvas = (await import('html2canvas')).default;
   const { jsPDF }   = await import('jspdf');
 
-  const prev = el.style.background;
-  el.style.background = '#fff';
+  await new Promise(resolve => setTimeout(resolve, 300));
 
-  const canvas = await html2canvas(el, {
-    scale:           2,
-    useCORS:         true,
-    backgroundColor: '#ffffff',
-    logging:         false,
+  const wrapper = document.createElement('div');
+  Object.assign(wrapper.style, {
+    position:   'fixed',
+    top:        '0',
+    left:       '-9999px',
+    width:      '794px',
+    background: '#ffffff',
+    zIndex:     '-1',
   });
+  const clone = el.cloneNode(true) as HTMLDivElement;
+  wrapper.appendChild(clone);
+  document.body.appendChild(wrapper);
 
-  el.style.background = prev;
+  try {
+    const canvas = await html2canvas(wrapper, {
+      scale:           2,
+      useCORS:         true,
+      backgroundColor: '#ffffff',
+      logging:         false,
+      width:           794,
+    });
 
-  const imgData = canvas.toDataURL('image/jpeg', 0.95);
-  const pdfW    = 210;                            // A4 width in mm
-  const pdfH    = (canvas.height * pdfW) / canvas.width;
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error('Canvas has zero dimensions');
+    }
 
-  const pdf = new jsPDF({
-    orientation: pdfH > pdfW ? 'portrait' : 'landscape',
-    unit:        'mm',
-    format:      [pdfW, pdfH],
-  });
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pdfW    = 210;
+    const pdfH    = Math.max(1, (canvas.height * pdfW) / canvas.width);
 
-  pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+    const pdf = new jsPDF({
+      orientation: pdfH > pdfW ? 'portrait' : 'landscape',
+      unit:        'mm',
+      format:      [pdfW, pdfH],
+    });
 
-  const blob = pdf.output('blob');
-  return new File([blob], `Invoice-${invoiceNumber}.pdf`, { type: 'application/pdf' });
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+
+    const blob = pdf.output('blob');
+    return new File([blob], `Invoice-${invoiceNumber}.pdf`, { type: 'application/pdf' });
+  } finally {
+    document.body.removeChild(wrapper);
+  }
 }
 
 // ── Helper: save a File blob to disk ─────────────────────────────────────────
