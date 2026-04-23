@@ -1,24 +1,10 @@
-/**
- * src/pages/driver/DeliveryDetailPage.tsx
- *
- * Aligned with DeliveryQueuePage / DriverDashboard patterns:
- *  - CompleteDeliveryDialog replaces the old inline "mark steps → done" dead end
- *  - Inline OTP widget removed — CompleteDeliveryDialog handles OTP internally
- *  - Van stock loaded on mount → checkDeliveryStock → stockCheck passed to dialog
- *  - StockRequestDialog with duplicate-guard (myRequests / pendingProductIds)
- *  - Stock status banner shown when partial / no stock on van
- *  - Progress steps kept for ACCEPTED → PICKED_UP → EN_ROUTE → ARRIVED → IN_PROGRESS
- *  - "Complete Delivery" CTA appears once driver is past ASSIGNED
- *  - Fail delivery modal unchanged
- */
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DriverLayout } from '@/components/layout/DriverLayout';
 import {
   MapPin, Phone, Navigation,
-  CheckCircle, XCircle, Loader2, ChevronRight,
-  AlertCircle, Check, ArrowRight,
+  CheckCircle, XCircle, Loader2,
+  AlertCircle,
   Droplets, X, Package,
   AlertTriangle, PackageX, PackagePlus, CheckCircle2,
 } from 'lucide-react';
@@ -42,22 +28,6 @@ import { cn } from '@/lib/utils';
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PROGRESS_STEPS: Array<{ status: string; label: string }> = [
-  { status: 'ACCEPTED',    label: 'Accepted'    },
-  { status: 'PICKED_UP',  label: 'Picked Up'   },
-  { status: 'EN_ROUTE',   label: 'En Route'    },
-  { status: 'ARRIVED',    label: 'Arrived'     },
-  { status: 'IN_PROGRESS',label: 'In Progress' },
-];
-
-const STATUS_TO_TIMELINE: Record<string, string> = {
-  ACCEPTED:    'accepted',
-  PICKED_UP:   'picked_up',
-  EN_ROUTE:    'started',
-  ARRIVED:     'arrived',
-  IN_PROGRESS: 'arrived',
-};
-
 const FAIL_REASONS: Array<{ value: string; label: string }> = [
   { value: 'CUSTOMER_UNAVAILABLE', label: 'Customer not available / not home' },
   { value: 'WRONG_ADDRESS',        label: 'Incorrect or wrong address'         },
@@ -69,7 +39,7 @@ const FAIL_REASONS: Array<{ value: string; label: string }> = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stock types & helpers (mirrors DeliveryQueuePage exactly)
+// Stock types & helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ItemStockStatus {
@@ -174,7 +144,7 @@ function isDeliveryAlreadyRequested(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stock banner — shown inline on the detail page when stock is short
+// Stock banner
 // ─────────────────────────────────────────────────────────────────────────────
 
 const StockBanner: React.FC<{
@@ -346,11 +316,10 @@ export const DeliveryDetailPage: React.FC = () => {
   const { id }   = useParams<{ id: string }>();
 
   // ── Core delivery state ──────────────────────────────────────────────────
-  const [delivery,    setDelivery]    = useState<DriverDeliveryDetail | null>(null);
-  const [loading,     setLoading]     = useState(true);
-  const [updating,    setUpdating]    = useState(false);
-  const [showFail,    setShowFail]    = useState(false);
-  const [completeOpen,setCompleteOpen]= useState(false);
+  const [delivery,     setDelivery]     = useState<DriverDeliveryDetail | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [showFail,     setShowFail]     = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
 
   // ── Van stock state ──────────────────────────────────────────────────────
   const [bottles,     setBottles]     = useState<DriverBottleStock[]>([]);
@@ -387,21 +356,7 @@ export const DeliveryDetailPage: React.FC = () => {
 
   useEffect(() => { if (id) load(id); }, [id, load]);
 
-  // ── Status update ─────────────────────────────────────────────────────────
-
-  const handleStatusUpdate = async (newStatus: string) => {
-    if (!id) return;
-    setUpdating(true);
-    try {
-      await deliveryService.updateStatus(id, newStatus);
-      toast.success(`Now: ${newStatus.replace(/_/g, ' ')}`);
-      await load(id);
-    } catch {
-      toast.error('Failed to update status');
-    } finally {
-      setUpdating(false);
-    }
-  };
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleFailed = async (reason: string, notes: string) => {
     if (!id) return;
@@ -437,8 +392,6 @@ export const DeliveryDetailPage: React.FC = () => {
     [myRequests],
   );
 
-  // ── Stock check for this delivery ─────────────────────────────────────────
-  // delivery as DriverDelivery is safe — DriverDeliveryDetail extends it
   const stockCheck = useMemo(() => {
     if (!delivery) return { status: 'unknown' as DeliveryStockStatus, itemChecks: [] };
     return checkDeliveryStock(delivery as unknown as DriverDelivery, bottleMap, consumableMap);
@@ -454,8 +407,6 @@ export const DeliveryDetailPage: React.FC = () => {
     );
   }, [delivery, stockCheck, pendingDeliveryIds, pendingProductIds]);
 
-  // ── Open stock request dialog ─────────────────────────────────────────────
-
   const openStockRequest = useCallback(() => {
     if (!delivery) return;
     const items = buildStockRequestFromDelivery(
@@ -467,7 +418,6 @@ export const DeliveryDetailPage: React.FC = () => {
       toast.success('Van is fully stocked for this delivery!');
       return;
     }
-    // Filter already-pending products (same guard as DeliveryQueuePage)
     const filtered = alreadyRequested
       ? items
       : items.filter(item => !pendingProductIds.has(item.product_id));
@@ -482,31 +432,12 @@ export const DeliveryDetailPage: React.FC = () => {
     setStockReqOpen(true);
   }, [delivery, bottleMap, consumableMap, alreadyRequested, pendingProductIds]);
 
-  // ── Progress step helpers ─────────────────────────────────────────────────
-
-  const getStepState = (step: typeof PROGRESS_STEPS[number]) => {
-    if (!delivery) return { isDone: false, isCurrent: false, isNext: false };
-    const tlKey     = STATUS_TO_TIMELINE[step.status];
-    const isDone    = !!delivery.timeline?.[tlKey as keyof typeof delivery.timeline];
-    const isCurrent = delivery.status === step.status;
-    const curIdx    = PROGRESS_STEPS.findIndex(s => s.status === delivery.status);
-    const stepIdx   = PROGRESS_STEPS.findIndex(s => s.status === step.status);
-    const isNext    = stepIdx === curIdx + 1;
-    return { isDone, isCurrent, isNext };
-  };
-
-  const currentStepIdx = PROGRESS_STEPS.findIndex(s => s.status === delivery?.status);
-  const totalSteps     = PROGRESS_STEPS.length;
-  const progressPct    = delivery?.status === 'COMPLETED' ? 100
-    : currentStepIdx >= 0 ? Math.round((currentStepIdx / totalSteps) * 100) : 0;
-  const nextStep       = PROGRESS_STEPS.find((_, i) => i === currentStepIdx + 1);
+  // ── Derived state ─────────────────────────────────────────────────────────
 
   const isAssigned   = delivery?.status === 'ASSIGNED';
   const isTerminal   = ['COMPLETED', 'FAILED'].includes(delivery?.status ?? '');
   const isInProgress = !isAssigned && !isTerminal;
-
-  // Whether to show the Complete CTA — driver is at least ACCEPTED
-  const canComplete = isInProgress;
+  const canComplete  = isInProgress;
 
   // ── Loading / not found ───────────────────────────────────────────────────
 
@@ -563,43 +494,6 @@ export const DeliveryDetailPage: React.FC = () => {
             </div>
           )}
 
-          {/* ── Progress bar ───────────────────────────────────────────────── */}
-          {isInProgress && (
-            <div className="rounded-2xl border border-border/60 bg-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold">
-                  {PROGRESS_STEPS[currentStepIdx]?.label ?? 'Starting'}
-                </span>
-                <span className="text-xs text-muted-foreground font-semibold">{progressPct}%</span>
-              </div>
-              <div className="h-2.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-700"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-2.5">
-                {PROGRESS_STEPS.map(s => {
-                  const { isDone, isCurrent } = getStepState(s);
-                  return (
-                    <div key={s.status} className="flex flex-col items-center gap-1">
-                      <div className={cn(
-                        'h-2.5 w-2.5 rounded-full transition-all',
-                        isDone || isCurrent ? 'bg-primary' : 'bg-muted-foreground/25',
-                      )} />
-                      <span className={cn(
-                        'text-[9px] font-bold',
-                        isCurrent ? 'text-primary' : 'text-muted-foreground/50',
-                      )}>
-                        {s.label.split(' ')[0]}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* ── Terminal banners ───────────────────────────────────────────── */}
           {delivery.status === 'COMPLETED' && (
             <div className="flex items-center gap-3 px-4 py-4 bg-emerald-500/8 border border-emerald-500/20 rounded-2xl">
@@ -634,13 +528,6 @@ export const DeliveryDetailPage: React.FC = () => {
           )}
 
           {/* ── Complete Delivery CTA ──────────────────────────────────────── */}
-          {/*
-            This replaces the old dead end where the driver could advance through
-            all progress steps but had no way to actually complete the delivery.
-            CompleteDeliveryDialog handles: item qty, bottles delivered/collected,
-            cash collection, short delivery reason, rating, notes, AND OTP
-            verification when the backend requires it.
-          */}
           {canComplete && (
             <button
               onClick={() => setCompleteOpen(true)}
@@ -780,14 +667,6 @@ export const DeliveryDetailPage: React.FC = () => {
       )}
 
       {/* ── Complete delivery dialog ───────────────────────────────────────── */}
-      {/*
-        Opens directly on the single-delivery confirm step (no list step)
-        because we already know which delivery we're completing.
-        stockCheck is passed so the dialog pre-caps quantities and shows
-        the StockAlertBanner when van stock is short.
-        OTP verification is handled entirely inside the dialog — no inline
-        OTP widget needed on this page.
-      */}
       <CompleteDeliveryDialog
         open={completeOpen}
         onClose={() => setCompleteOpen(false)}
@@ -802,6 +681,7 @@ export const DeliveryDetailPage: React.FC = () => {
         } as unknown as DriverDelivery}
         stockCheck={stockCheck}
       />
+
       {/* ── Stock request dialog ───────────────────────────────────────────── */}
       <StockRequestDialog
         open={stockReqOpen}

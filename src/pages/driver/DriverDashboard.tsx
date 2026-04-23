@@ -23,6 +23,7 @@ import {
   Loader2, Search, Package, Users, ChevronRight, AlertCircle, X,
   Zap, CheckCircle2, ShoppingCart, RefreshCw,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { deliveryService, type DriverDelivery } from '@/api/services/delivery.service';
 import {
   driverStoreService,
@@ -480,6 +481,7 @@ const DeliveryCard: React.FC<{
 
 export const DriverDashboard: React.FC = () => {
   // ── State ─────────────────────────────────────────────────────────────────
+  const navigate = useNavigate();
   const [profile,        setProfile]        = useState<DriverProfile | null>(null);
   const [deliveries,     setDeliveries]     = useState<DriverDelivery[]>([]);
   const [bottles,        setBottles]        = useState<DriverBottleStock[]>([]);
@@ -525,7 +527,7 @@ export const DriverDashboard: React.FC = () => {
     try {
       await deliveryService.acceptDelivery(deliveryId);
       toast.success('Delivery accepted');
-      loadData();
+      navigate(`/driver/deliveries/${deliveryId}`);  // go to detail page
     } catch {
       toast.error('Failed to accept delivery');
     }
