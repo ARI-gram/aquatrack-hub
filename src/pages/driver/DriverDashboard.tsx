@@ -1,19 +1,19 @@
 /**
  * src/pages/driver/DriverDashboard.tsx
- * Rearranged for drivers on the go:
- *  - "Next Stop" hero card pinned at top when a delivery is ACCEPTED
- *  - Compact stats strip (no duplicate rate card)
- *  - Quick Actions bar (Complete Delivery, Direct Sale, Request Top-up)
- *  - Action buttons resized: icon-only Call/Nav + full-width primary action
- *  - Desktop: single-col queue + thin completed sidebar (rate card removed)
- *  - All original logic, state, and handlers preserved exactly
  *
- * UPDATE: CompleteDeliveryDialog now uses the same CompleteTarget pattern
- * as DeliveryQueuePage — passes initialDelivery when a delivery is ACCEPTED
- * so the dialog opens directly on the confirm step instead of the list.
+ * Complete delivery flow now mirrors DeliveryQueuePage exactly:
+ *  - Stock maps (bottleMap / consumableMap) derived from van stock on every load
+ *  - checkDeliveryStock run before opening CompleteDeliveryDialog — stockCheck passed in
+ *  - CompleteTarget carries stockCheck for both single & bulk modes
+ *  - myRequests fetched on load → pendingDeliveryIds / pendingProductIds sets built
+ *  - openStockRequest has the same duplicate-guard as DeliveryQueuePage
+ *  - "Complete Delivery" quick action computes stockCheck for the ACCEPTED delivery
+ *    before opening the dialog (falls back to list mode with no stockCheck when none)
  *
- * UPDATE 2: "Request Top-up" quick action now opens StockRequestDialog
- * instead of navigating to /driver/store.
+ * FIX: DeliveryCard "Open" button and NextStopHero "View Delivery" button have
+ * been replaced with "Complete" / "Complete Delivery" buttons that open
+ * CompleteDeliveryDialog directly — no navigation to DeliveryDetailPage.
+ * DeliveryDetailPage is no longer involved in the completion flow at all.
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -21,9 +21,9 @@ import { DriverLayout } from '@/components/layout/DriverLayout';
 import {
   Truck, CheckCircle, MapPin, Clock, Navigation, Phone,
   Loader2, Search, Package, Users, ChevronRight, AlertCircle, X,
-  Zap, ArrowRight, CheckCircle2, ShoppingCart, RefreshCw,
+  Zap, CheckCircle2, ShoppingCart, RefreshCw,
 } from 'lucide-react';
-import { deliveryService, DriverDelivery } from '@/api/services/delivery.service';
+import { deliveryService, type DriverDelivery } from '@/api/services/delivery.service';
 import {
   driverStoreService,
   type DriverBottleStock,
@@ -31,19 +31,59 @@ import {
 } from '@/api/services/driver-store.service';
 import { CompleteDeliveryDialog } from '@/components/dialogs/CompleteDeliveryDialog';
 import { DirectSaleDialog } from '@/components/dialogs/DirectSaleDialog';
-import { StockRequestDialog } from '@/components/dialogs/StockRequestDialog';
+import { StockRequestDialog, type StockRequestItem } from '@/components/dialogs/StockRequestDialog';
+import {
+  stockRequestService,
+  type StockRequest,
+} from '@/api/services/stock-request.service';
+import { type CustomerGroup } from '@/lib/deliveryUtils';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+
+// ── Stock types ────────────────────────────────────────────────────────────────
+
+export interface ItemStockStatus {
+  product_id:    string;
+  product_name:  string;
+  product_unit:  string;
+  is_returnable: boolean;
+  ordered_qty:   number;
+  available_qty: number;
+}
+
+export type DeliveryStockStatus = 'full' | 'partial' | 'none' | 'unknown';
+
+export interface DeliveryStockCheck {
+  status:     DeliveryStockStatus;
+  itemChecks: ItemStockStatus[];
+}
+
+type DriverDeliveryWithItems = DriverDelivery & {
+  order_items?: Array<{
+    id:            string;
+    product_id:    string;
+    product_name:  string;
+    product_unit:  string;
+    is_returnable: boolean;
+    quantity:      number;
+  }>;
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SortKey = 'status_active' | 'time_asc';
 
-// Mirrors the CompleteTarget pattern from DeliveryQueuePage
 type CompleteTarget =
   | { mode: 'list' }
-  | { mode: 'single'; delivery: DriverDelivery };
+  | { mode: 'single'; delivery: DriverDelivery; stockCheck: DeliveryStockCheck }
+  | { mode: 'bulk';   group: CustomerGroup;     stockCheck: DeliveryStockCheck };
+
+interface StockRequestState {
+  open:         boolean;
+  prefillItems: StockRequestItem[];
+  deliveryId?:  string;
+  orderNumber?: string;
+}
 
 interface DriverProfile {
   driver: { name: string; phone: string; vehicle_number: string };
@@ -51,7 +91,9 @@ interface DriverProfile {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; dot: string; pill: string; bar: string; priority: number }> = {
+const STATUS_CFG: Record<string, {
+  label: string; dot: string; pill: string; bar: string; priority: number;
+}> = {
   ASSIGNED:    { label: 'New',          dot: 'bg-amber-400',   pill: 'bg-amber-50   text-amber-700   border-amber-200',   bar: 'bg-amber-400',   priority: 1 },
   ACCEPTED:    { label: 'Accepted',     dot: 'bg-sky-500',     pill: 'bg-sky-50     text-sky-700     border-sky-200',     bar: 'bg-sky-500',     priority: 2 },
   PICKED_UP:   { label: 'Picked Up',   dot: 'bg-violet-500',  pill: 'bg-violet-50  text-violet-700  border-violet-200',  bar: 'bg-violet-500',  priority: 3 },
@@ -61,6 +103,8 @@ const STATUS_CFG: Record<string, { label: string; dot: string; pill: string; bar
   COMPLETED:   { label: 'Completed',   dot: 'bg-emerald-500', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'bg-emerald-500', priority: 99 },
   FAILED:      { label: 'Failed',      dot: 'bg-red-400',     pill: 'bg-red-50     text-red-700     border-red-200',     bar: 'bg-red-400',     priority: 99 },
 };
+
+const ACTIVE_STATUSES = ['ASSIGNED','ACCEPTED','PICKED_UP','EN_ROUTE','ARRIVED','IN_PROGRESS'];
 
 function parseTimeSlot(slot: string): number {
   const match = slot?.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -74,6 +118,81 @@ function parseTimeSlot(slot: string): number {
 
 function isActive(status: string) {
   return !['COMPLETED', 'FAILED'].includes(status);
+}
+
+// ── Stock helpers ─────────────────────────────────────────────────────────────
+
+function buildBottleMap(bottles: DriverBottleStock[]): Map<string, number> {
+  return new Map(bottles.map(b => [b.product_id, b.balance.full]));
+}
+
+function buildConsumableMap(consumables: DriverConsumableStock[]): Map<string, number> {
+  return new Map(consumables.map(c => [c.product_id, c.balance.in_stock]));
+}
+
+function checkDeliveryStock(
+  delivery: DriverDelivery,
+  bottleMap: Map<string, number>,
+  consumableMap: Map<string, number>,
+): DeliveryStockCheck {
+  const items = (delivery as DriverDeliveryWithItems).order_items;
+  if (!items || items.length === 0) return { status: 'unknown', itemChecks: [] };
+
+  const itemChecks: ItemStockStatus[] = items.map(item => {
+    const available = item.is_returnable
+      ? (bottleMap.get(item.product_id) ?? 0)
+      : (consumableMap.get(item.product_id) ?? 0);
+    return {
+      product_id:    item.product_id,
+      product_name:  item.product_name,
+      product_unit:  item.product_unit,
+      is_returnable: item.is_returnable,
+      ordered_qty:   item.quantity,
+      available_qty: available,
+    };
+  });
+
+  const anyAvailable = itemChecks.some(c => c.available_qty > 0);
+  const allFull      = itemChecks.every(c => c.available_qty >= c.ordered_qty);
+  const status: DeliveryStockStatus =
+    allFull ? 'full' : anyAvailable ? 'partial' : 'none';
+
+  return { status, itemChecks };
+}
+
+function buildStockRequestFromDeliveries(
+  deliveries: DriverDelivery[],
+  bottleMap: Map<string, number>,
+  consumableMap: Map<string, number>,
+): StockRequestItem[] {
+  const aggregated = new Map<string, StockRequestItem>();
+  for (const delivery of deliveries) {
+    if (!isActive(delivery.status)) continue;
+    const check = checkDeliveryStock(delivery, bottleMap, consumableMap);
+    if (check.status === 'unknown' || check.status === 'full') continue;
+    for (const item of check.itemChecks) {
+      const shortage = Math.max(0, item.ordered_qty - item.available_qty);
+      if (shortage <= 0) continue;
+      const existing = aggregated.get(item.product_id);
+      if (existing) {
+        aggregated.set(item.product_id, {
+          ...existing,
+          quantity_requested: existing.quantity_requested + shortage,
+          needed_qty: (existing.needed_qty ?? 0) + item.ordered_qty,
+        });
+      } else {
+        aggregated.set(item.product_id, {
+          product_id:         item.product_id,
+          product_name:       item.product_name,
+          product_type:       item.is_returnable ? 'bottle' : 'consumable',
+          current_qty:        item.available_qty,
+          needed_qty:         item.ordered_qty,
+          quantity_requested: shortage,
+        });
+      }
+    }
+  }
+  return Array.from(aggregated.values());
 }
 
 // ── Status Pill ───────────────────────────────────────────────────────────────
@@ -146,17 +265,17 @@ const QuickActionBar: React.FC<{
 };
 
 // ── Next Stop Hero Card ────────────────────────────────────────────────────────
+// FIX: "View Delivery" → "Complete Delivery" — opens dialog, no page navigation
 
 const NextStopHero: React.FC<{
   delivery:   DriverDelivery;
+  stockCheck: DeliveryStockCheck;
   onAccept:   (id: string) => void;
-  onNavigate: (id: string) => void;
-}> = ({ delivery, onAccept, onNavigate }) => (
+  onComplete: (delivery: DriverDelivery, stockCheck: DeliveryStockCheck) => void;
+}> = ({ delivery, stockCheck, onAccept, onComplete }) => (
   <div className="relative rounded-2xl overflow-hidden mb-4 border border-primary/30 shadow-lg shadow-primary/5">
-    {/* Top stripe */}
     <div className="h-1 w-full bg-primary" />
 
-    {/* Animated pulse badge */}
     <div className="absolute top-4 right-4">
       <span className="inline-flex items-center gap-1.5 text-[10px] font-black bg-primary text-primary-foreground rounded-full px-2.5 py-1">
         <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground animate-pulse" />
@@ -165,19 +284,16 @@ const NextStopHero: React.FC<{
     </div>
 
     <div className="p-4 pt-3.5">
-      {/* Customer name + order */}
       <div className="mb-3 pr-24">
         <p className="font-bold text-lg leading-tight truncate">{delivery.customer_name}</p>
         <p className="text-xs text-muted-foreground font-mono mt-0.5">{delivery.order_number}</p>
       </div>
 
-      {/* Address — prominent */}
       <div className="flex items-start gap-2.5 bg-primary/5 border border-primary/15 rounded-xl px-3.5 py-3 mb-3">
         <MapPin className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
         <span className="text-sm font-medium leading-relaxed line-clamp-2">{delivery.full_address}</span>
       </div>
 
-      {/* Meta row */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground mb-4">
         <span className="flex items-center gap-1.5 font-semibold">
           <Clock className="h-3.5 w-3.5" />{delivery.scheduled_time_slot}
@@ -199,7 +315,7 @@ const NextStopHero: React.FC<{
         </div>
       )}
 
-      {/* Actions: compact icon buttons + big primary CTA */}
+      {/* Call + Navigate icon buttons + Complete CTA */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => window.open(`tel:${delivery.customer_phone}`)}
@@ -215,44 +331,54 @@ const NextStopHero: React.FC<{
         >
           <Navigation className="h-4.5 w-4.5 text-muted-foreground" />
         </button>
+        {/* FIX: was "View Delivery → navigate(id)", now opens CompleteDeliveryDialog */}
         <button
-          className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors active:scale-[0.98] shadow-md shadow-primary/20"
-          onClick={() => onNavigate(delivery.id)}
+          className={cn(
+            'flex-1 h-12 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2',
+            'transition-colors active:scale-[0.98] shadow-md',
+            stockCheck.status === 'none'
+              ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
+              : stockCheck.status === 'partial'
+              ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20'
+              : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20',
+          )}
+          onClick={() => onComplete(delivery, stockCheck)}
         >
-          View Delivery <ArrowRight className="h-4 w-4" />
+          <CheckCircle className="h-4 w-4" />
+          {stockCheck.status === 'none'
+            ? 'Complete (Short)'
+            : stockCheck.status === 'partial'
+            ? 'Complete (Partial)'
+            : 'Complete Delivery'
+          }
         </button>
       </div>
     </div>
   </div>
 );
 
-// ── Delivery Card (queue items) ───────────────────────────────────────────────
+// ── Delivery Card ─────────────────────────────────────────────────────────────
+// FIX: "Open → navigate(id)" replaced with "Complete → opens dialog directly"
 
 const DeliveryCard: React.FC<{
   delivery:   DriverDelivery;
   index:      number;
-  isNext:     boolean;
   hasSibling: boolean;
+  stockCheck: DeliveryStockCheck;
   onAccept:   (id: string) => void;
-  onNavigate: (id: string) => void;
-}> = ({ delivery, index, isNext, hasSibling, onAccept, onNavigate }) => {
+  onComplete: (delivery: DriverDelivery, stockCheck: DeliveryStockCheck) => void;
+}> = ({ delivery, index, hasSibling, stockCheck, onAccept, onComplete }) => {
   const cfg = STATUS_CFG[delivery.status] ?? STATUS_CFG['ASSIGNED'];
+  const isCompletable = ACTIVE_STATUSES.includes(delivery.status) && delivery.status !== 'ASSIGNED';
 
   return (
-    <div className={cn(
-      'relative rounded-2xl border overflow-hidden transition-all duration-200',
-      isNext ? 'border-primary/30 bg-card' : 'border-border/60 bg-card',
-    )}>
-      {/* Left accent bar */}
+    <div className="relative rounded-2xl border border-border/60 bg-card overflow-hidden transition-all duration-200">
       <div className={cn('absolute left-0 top-0 bottom-0 w-[3px]', cfg.bar)} />
 
       <div className="pl-4 pr-4 pt-3.5 pb-3.5">
-        {/* Top row: index + name + status */}
+        {/* Top row */}
         <div className="flex items-center gap-2.5 mb-2.5">
-          <span className={cn(
-            'h-7 w-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0',
-            isNext ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-          )}>
+          <span className="h-7 w-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 bg-muted text-muted-foreground">
             {index + 1}
           </span>
           <div className="flex-1 min-w-0">
@@ -269,13 +395,13 @@ const DeliveryCard: React.FC<{
           <StatusPill status={delivery.status} />
         </div>
 
-        {/* Address — compact */}
+        {/* Address */}
         <div className="flex items-start gap-2 text-xs text-muted-foreground mb-2.5 bg-muted/30 rounded-xl px-3 py-2">
           <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground/60" />
           <span className="line-clamp-1 leading-relaxed">{delivery.full_address}</span>
         </div>
 
-        {/* Meta chips */}
+        {/* Meta */}
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-3 flex-wrap">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />{delivery.scheduled_time_slot}
@@ -313,21 +439,37 @@ const DeliveryCard: React.FC<{
           >
             <Navigation className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
+
           {delivery.status === 'ASSIGNED' ? (
+            /* ASSIGNED — accept first */
             <button
               className="flex-1 h-10 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-colors active:scale-[0.98]"
               onClick={() => onAccept(delivery.id)}
             >
               <CheckCircle className="h-3.5 w-3.5" />Accept
             </button>
-          ) : (
+          ) : isCompletable ? (
+            /* FIX: was "Open → navigate(id)", now opens CompleteDeliveryDialog */
             <button
-              className="flex-1 h-10 rounded-xl bg-muted/60 border border-border/60 text-foreground text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-muted transition-colors active:scale-[0.98]"
-              onClick={() => onNavigate(delivery.id)}
+              className={cn(
+                'flex-1 h-10 rounded-xl text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-[0.98]',
+                stockCheck.status === 'none'
+                  ? 'bg-red-500 hover:bg-red-600'
+                  : stockCheck.status === 'partial'
+                  ? 'bg-amber-500 hover:bg-amber-600'
+                  : 'bg-emerald-600 hover:bg-emerald-700',
+              )}
+              onClick={() => onComplete(delivery, stockCheck)}
             >
-              Open<ChevronRight className="h-3.5 w-3.5" />
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {stockCheck.status === 'none'
+                ? 'Complete (Short)'
+                : stockCheck.status === 'partial'
+                ? 'Complete (Partial)'
+                : 'Complete'
+              }
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -337,32 +479,37 @@ const DeliveryCard: React.FC<{
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export const DriverDashboard: React.FC = () => {
-  const navigate = useNavigate();
-
   // ── State ─────────────────────────────────────────────────────────────────
-  const [profile,         setProfile]         = useState<DriverProfile | null>(null);
-  const [deliveries,      setDeliveries]       = useState<DriverDelivery[]>([]);
-  const [bottles,         setBottles]          = useState<DriverBottleStock[]>([]);
-  const [consumables,     setConsumables]      = useState<DriverConsumableStock[]>([]);
-  const [isLoading,       setIsLoading]        = useState(true);
-  const [search,          setSearch]           = useState('');
-  const [sortKey,         setSortKey]          = useState<SortKey>('status_active');
-  const [completeTarget,  setCompleteTarget]   = useState<CompleteTarget | null>(null);
-  const [saleOpen,        setSaleOpen]         = useState(false);
-  const [topUpOpen,       setTopUpOpen]        = useState(false);
+  const [profile,        setProfile]        = useState<DriverProfile | null>(null);
+  const [deliveries,     setDeliveries]     = useState<DriverDelivery[]>([]);
+  const [bottles,        setBottles]        = useState<DriverBottleStock[]>([]);
+  const [consumables,    setConsumables]    = useState<DriverConsumableStock[]>([]);
+  const [myRequests,     setMyRequests]     = useState<StockRequest[]>([]);
+  const [isLoading,      setIsLoading]      = useState(true);
+  const [search,         setSearch]         = useState('');
+  const [sortKey,        setSortKey]        = useState<SortKey>('status_active');
+  const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
+  const [saleOpen,       setSaleOpen]       = useState(false);
+  const [stockReqState,  setStockReqState]  = useState<StockRequestState>({
+    open: false, prefillItems: [],
+  });
+
+  // ── Data loading ───────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
-      const [profileData, deliveriesData, b, c] = await Promise.all([
+      const [profileData, deliveriesData, b, c, myReqs] = await Promise.all([
         deliveryService.getDriverProfile(),
         deliveryService.getDriverDeliveries(),
         driverStoreService.getBottleStock(),
         driverStoreService.getConsumableStock(),
+        stockRequestService.getMyRequests().catch(() => [] as StockRequest[]),
       ]);
       setProfile(profileData);
       setDeliveries(deliveriesData.deliveries || []);
       setBottles(b);
       setConsumables(c);
+      setMyRequests(myReqs.filter((r: StockRequest) => r.status === 'PENDING'));
     } catch {
       toast.error('Failed to load dashboard data');
     } finally {
@@ -371,6 +518,8 @@ export const DriverDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleAccept = async (deliveryId: string) => {
     try {
@@ -385,11 +534,50 @@ export const DriverDashboard: React.FC = () => {
   const handleDone = useCallback(() => {
     setCompleteTarget(null);
     setSaleOpen(false);
-    setTopUpOpen(false);
+    setStockReqState({ open: false, prefillItems: [] });
     loadData();
   }, [loadData]);
 
-  // ── Computed values ───────────────────────────────────────────────────────
+  // ── Derived stock maps ─────────────────────────────────────────────────────
+
+  const bottleMap     = useMemo(() => buildBottleMap(bottles),         [bottles]);
+  const consumableMap = useMemo(() => buildConsumableMap(consumables), [consumables]);
+
+  // ── Pending-request lookup sets ────────────────────────────────────────────
+
+  const pendingProductIds = useMemo(
+    () => new Set(myRequests.flatMap(r => r.items.map(i => i.product_id))),
+    [myRequests],
+  );
+
+  // ── Open stock request (with duplicate guard) ──────────────────────────────
+
+  const openStockRequest = useCallback(() => {
+    const prefill = buildStockRequestFromDeliveries(deliveries, bottleMap, consumableMap);
+    if (prefill.length === 0) {
+      toast.success('No stock shortages found — your van is fully loaded!');
+      return;
+    }
+    const filtered = prefill.filter(item => !pendingProductIds.has(item.product_id));
+    if (filtered.length === 0) {
+      toast.info('All shortages already have a pending request — nothing new to send.');
+      return;
+    }
+    setStockReqState({ open: true, prefillItems: filtered });
+  }, [deliveries, bottleMap, consumableMap, pendingProductIds]);
+
+  // ── Open complete dialog for a single delivery ─────────────────────────────
+  // Used by both DeliveryCard and NextStopHero
+
+  const handleOpenComplete = useCallback((
+    delivery: DriverDelivery,
+    stockCheck: DeliveryStockCheck,
+  ) => {
+    setCompleteTarget({ mode: 'single', delivery, stockCheck });
+  }, []);
+
+  // ── Computed values ────────────────────────────────────────────────────────
+
   const remaining  = deliveries.filter(d => isActive(d.status)).length;
   const completed  = deliveries.filter(d => d.status === 'COMPLETED').length;
   const totalItems = deliveries.reduce((s, d) => s + (d.items_count || 0), 0);
@@ -424,11 +612,25 @@ export const DriverDashboard: React.FC = () => {
 
   const completedDeliveries = deliveries.filter(d => d.status === 'COMPLETED');
   const nextDelivery        = activeDeliveries.find(d => d.status === 'ACCEPTED');
+  const queueDeliveries     = activeDeliveries.filter(d => d.id !== nextDelivery?.id);
 
-  // Queue items exclude the nextDelivery hero (avoid duplication)
-  const queueDeliveries = activeDeliveries.filter(d => d.id !== nextDelivery?.id);
+  // Pre-compute stockCheck for the nextDelivery hero card
+  const nextStockCheck = useMemo(
+    () => nextDelivery
+      ? checkDeliveryStock(nextDelivery, bottleMap, consumableMap)
+      : null,
+    [nextDelivery, bottleMap, consumableMap],
+  );
 
-  // ── Loading state ─────────────────────────────────────────────────────────
+  // Dialog derived props
+  const completeDialogOpen      = completeTarget !== null;
+  const completeInitialDelivery = completeTarget?.mode === 'single' ? completeTarget.delivery : undefined;
+  const completeInitialGroup    = completeTarget?.mode === 'bulk'   ? completeTarget.group    : undefined;
+  const completeStockCheck      = (completeTarget?.mode === 'single' || completeTarget?.mode === 'bulk')
+    ? completeTarget.stockCheck : undefined;
+
+  // ── Loading state ──────────────────────────────────────────────────────────
+
   if (isLoading) {
     return (
       <DriverLayout title="My Deliveries" subtitle="Loading…">
@@ -439,13 +641,15 @@ export const DriverDashboard: React.FC = () => {
     );
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <DriverLayout
       title="My Deliveries"
       subtitle={profile?.driver?.name ? `Hi, ${profile.driver.name.split(' ')[0]}` : 'Dashboard'}
     >
 
-      {/* ── Compact stats strip ── */}
+      {/* ── Stats strip ── */}
       <div className="grid grid-cols-4 gap-2 mb-4">
         {[
           { label: 'To Go',  val: remaining,         cls: remaining > 0 ? 'bg-blue-50 text-blue-700 border-blue-200/60' : 'bg-muted/60 text-muted-foreground border-border/60' },
@@ -485,26 +689,20 @@ export const DriverDashboard: React.FC = () => {
       )}
 
       {/* ── Quick Actions ── */}
-      {/*
-        If there is an ACCEPTED delivery (nextDelivery), "Complete Delivery"
-        opens the dialog directly on that delivery's confirm step — same UX
-        as tapping Complete on a card in DeliveryQueuePage.
-        If no delivery is accepted yet, falls back to list mode so the driver
-        can pick one manually.
-        "Request Top-up" opens StockRequestDialog (auto-populates low/out items).
-      */}
       <QuickActionBar
-        onComplete={() => setCompleteTarget(
-          nextDelivery
-            ? { mode: 'single', delivery: nextDelivery }
-            : { mode: 'list' }
-        )}
+        onComplete={() => {
+          if (nextDelivery && nextStockCheck) {
+            setCompleteTarget({ mode: 'single', delivery: nextDelivery, stockCheck: nextStockCheck });
+          } else {
+            setCompleteTarget({ mode: 'list' });
+          }
+        }}
         onSale={() => setSaleOpen(true)}
-        onTopUp={() => setTopUpOpen(true)}
+        onTopUp={openStockRequest}
       />
 
-      {/* ── Next Stop Hero ── only shown when a delivery is ACCEPTED */}
-      {nextDelivery && (
+      {/* ── Next Stop Hero ── */}
+      {nextDelivery && nextStockCheck && (
         <>
           <div className="flex items-center gap-2 mb-2">
             <Zap className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -514,8 +712,9 @@ export const DriverDashboard: React.FC = () => {
           </div>
           <NextStopHero
             delivery={nextDelivery}
+            stockCheck={nextStockCheck}
             onAccept={handleAccept}
-            onNavigate={id => navigate(`/driver/deliveries/${id}`)}
+            onComplete={handleOpenComplete}
           />
         </>
       )}
@@ -525,7 +724,6 @@ export const DriverDashboard: React.FC = () => {
         {/* ── Delivery Queue ── */}
         <div className="lg:col-span-2 space-y-3">
 
-          {/* Queue header */}
           <div className="flex items-center gap-2">
             <h2 className="font-bold text-sm flex-1">
               {nextDelivery ? 'Up Next' : 'Delivery Queue'}
@@ -583,7 +781,6 @@ export const DriverDashboard: React.FC = () => {
             </p>
           )}
 
-          {/* List */}
           {queueDeliveries.length === 0 ? (
             <div className="rounded-2xl border border-border/60 bg-muted/20 py-12 text-center">
               <Package className="h-8 w-8 mx-auto mb-2.5 opacity-20" />
@@ -602,10 +799,10 @@ export const DriverDashboard: React.FC = () => {
                   key={delivery.id}
                   delivery={delivery}
                   index={i}
-                  isNext={false}
                   hasSibling={(customerCount[delivery.customer_name] ?? 0) > 1}
+                  stockCheck={checkDeliveryStock(delivery, bottleMap, consumableMap)}
                   onAccept={handleAccept}
-                  onNavigate={id => navigate(`/driver/deliveries/${id}`)}
+                  onComplete={handleOpenComplete}
                 />
               ))}
             </div>
@@ -624,26 +821,18 @@ export const DriverDashboard: React.FC = () => {
               </div>
               <div className="p-3 space-y-1.5 max-h-[60vh] overflow-y-auto">
                 {completedDeliveries.map(d => (
-                  <button
-                    key={d.id}
-                    onClick={() => navigate(`/driver/deliveries/${d.id}`)}
-                    className="w-full flex items-center justify-between p-3 rounded-xl bg-emerald-50/60 border border-emerald-100/80 hover:bg-emerald-50 transition-colors active:scale-[0.98] group"
-                  >
+                  <div key={d.id} className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/60 border border-emerald-100/80">
                     <span className="text-sm font-medium truncate mr-2">{d.customer_name}</span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-[10px] text-muted-foreground">{d.scheduled_time_slot}</span>
-                      <ChevronRight className="h-3 w-3 text-muted-foreground/50 group-hover:text-muted-foreground" />
-                    </div>
-                  </button>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{d.scheduled_time_slot}</span>
+                  </div>
                 ))}
               </div>
             </div>
           </div>
         )}
-
       </div>
 
-      {/* ── Completed deliveries on mobile (compact list at bottom) ── */}
+      {/* ── Completed deliveries on mobile ── */}
       {completedDeliveries.length > 0 && (
         <div className="mt-4 lg:hidden">
           <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
@@ -655,20 +844,13 @@ export const DriverDashboard: React.FC = () => {
             </div>
             <div className="p-2.5 space-y-1">
               {completedDeliveries.map(d => (
-                <button
-                  key={d.id}
-                  onClick={() => navigate(`/driver/deliveries/${d.id}`)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors active:scale-[0.98] group"
-                >
+                <div key={d.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
                     <span className="text-sm font-medium truncate">{d.customer_name}</span>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                    <span className="text-[10px] text-muted-foreground">{d.scheduled_time_slot}</span>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground" />
-                  </div>
-                </button>
+                  <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{d.scheduled_time_slot}</span>
+                </div>
               ))}
             </div>
           </div>
@@ -676,14 +858,13 @@ export const DriverDashboard: React.FC = () => {
       )}
 
       {/* ── Dialogs ── */}
-      {/* No initialGroup on the dashboard — bulk mode lives in DeliveryQueuePage */}
       <CompleteDeliveryDialog
-        open={completeTarget !== null}
+        open={completeDialogOpen}
         onClose={() => setCompleteTarget(null)}
         onDone={handleDone}
-        initialDelivery={
-          completeTarget?.mode === 'single' ? completeTarget.delivery : undefined
-        }
+        initialDelivery={completeInitialDelivery}
+        initialGroup={completeInitialGroup}
+        stockCheck={completeStockCheck}
       />
 
       <DirectSaleDialog
@@ -694,10 +875,12 @@ export const DriverDashboard: React.FC = () => {
         consumables={consumables}
       />
 
-      {/* Stock top-up request — auto-populates with low/out items from van stock */}
       <StockRequestDialog
-        open={topUpOpen}
-        onClose={() => setTopUpOpen(false)}
+        open={stockReqState.open}
+        onClose={() => setStockReqState(s => ({ ...s, open: false }))}
+        prefillItems={stockReqState.prefillItems}
+        deliveryId={stockReqState.deliveryId}
+        deliveryOrderNumber={stockReqState.orderNumber}
       />
 
     </DriverLayout>
