@@ -4,12 +4,14 @@ from django.utils.dateparse import parse_date
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
 
 from apps.accounts.models import AccountingSettings
 from apps.products.models import BottleMovement, ConsumableMovement
-
+from apps.customers.authentication import CustomerJWTAuthentication
 
 # ── Permission ────────────────────────────────────────────────────────────────
+
 
 class IsAccountsStaff(permissions.BasePermission):
     """client_admin and accountant can read/write. Drivers can read (for receipts)."""
@@ -332,3 +334,22 @@ class DirectSalesView(APIView):
                 'totalPages': total_pages,
             },
         })
+
+
+class CustomerAccountingSettingsView(APIView):
+    """
+    GET /api/customer/accounting-settings/
+    Returns the distributor's accounting settings for the authenticated customer.
+    Used by the customer receipt modal to show real business details.
+    """
+    authentication_classes = [CustomerJWTAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from apps.accounts.models import AccountingSettings
+        customer = request.user.customer
+        try:
+            s = AccountingSettings.objects.get(client=customer.client)
+            return Response(_settings_to_dict(s))
+        except AccountingSettings.DoesNotExist:
+            return Response({})

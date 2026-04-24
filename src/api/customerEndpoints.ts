@@ -87,5 +87,7 @@ export const CUSTOMER_API_ENDPOINTS = {
   PRODUCTS: {
     LIST: '/customer/products/',
   },
-
+ 
+  // Inside CUSTOMER_API_ENDPOINTS, add:
+  ACCOUNTING_SETTINGS: '/customer/accounting-settings/',
 } as const;

@@ -1,16 +1,9 @@
 /**
  * Order History Page — Customer Portal
  * Route: /customer/history
- *
- * Changes vs original:
- *  - ReceiptModal is now a full bottom-sheet (matching DriverSaleReceiptModal)
- *    with WhatsApp, Print, and PDF-download actions via useInvoicePrint.
- *  - Customer profile (name + phone) is fetched once and cached so the receipt
- *    shows real customer details and enables WhatsApp sharing.
- *  - buildReceiptData now accepts customerName + customerPhone from the profile.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CustomerLayout } from '@/components/layout/CustomerLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,60 +36,54 @@ import {
   Droplets,
   SlidersHorizontal,
   ArrowUpRight,
-  FileText,
-  Printer,
-  Download,
-  Share2,
-  X,
+  Receipt,
 } from 'lucide-react';
 import axiosInstance from '@/api/axios.config';
 import { CUSTOMER_API_ENDPOINTS } from '@/api/customerEndpoints';
 import { toast } from 'sonner';
-import { InvoiceTemplate } from '@/pages/accounts/InvoiceTemplate';
-import type { TemplateData } from '@/pages/accounts/InvoiceTemplate';
-import type { AccountingSettings } from '@/types/accounting.types';
-import { useInvoicePrint } from '@/hooks/useInvoicePrint';
+import { CustomerReceiptModal } from '@/components/customer/CustomerReceiptModal';
+import type { CustomerOrderForReceipt } from '@/components/customer/CustomerReceiptModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface OrderItemResponse {
-  id: string;
-  product: string | null;
+  id:           string;
+  product:      string | null;
   product_name: string;
   product_unit: string;
-  quantity: number;
-  unit_price: string;
-  subtotal: string;
+  quantity:     number;
+  unit_price:   string;
+  subtotal:     string;
 }
 
 interface OrderDeliveryResponse {
-  scheduled_date: string;
-  scheduled_time_slot: string;
-  address_label: string;
-  full_address: string;
-  driver_name: string | null;
-  driver_phone: string | null;
+  scheduled_date:       string;
+  scheduled_time_slot:  string;
+  address_label:        string;
+  full_address:         string;
+  driver_name:          string | null;
+  driver_phone:         string | null;
   actual_delivery_time: string | null;
-  delivery_notes: string;
+  delivery_notes:       string;
 }
 
 interface OrderResponse {
-  id: string;
-  order_number: string;
-  order_type: string;
-  status: string;
-  subtotal: string;
-  delivery_fee: string;
-  discount_amount: string;
-  total_amount: string;
-  payment_status: string;
-  payment_method: string;
-  paid_at: string | null;
+  id:                  string;
+  order_number:        string;
+  order_type:          string;
+  status:              string;
+  subtotal:            string;
+  delivery_fee:        string;
+  discount_amount:     string;
+  total_amount:        string;
+  payment_status:      string;
+  payment_method:      string;
+  paid_at:             string | null;
   special_instructions: string;
-  items: OrderItemResponse[];
-  delivery: OrderDeliveryResponse | null;
-  created_at: string;
-  updated_at: string;
+  items:               OrderItemResponse[];
+  delivery:            OrderDeliveryResponse | null;
+  created_at:          string;
+  updated_at:          string;
 }
 
 type OrderListResponse = OrderResponse[] | { results: OrderResponse[]; count: number };
@@ -118,7 +105,12 @@ const STATUS_CONFIG: Record<string, {
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
-  WALLET: 'Wallet', CASH: 'Cash on Delivery', MPESA: 'M-Pesa', CARD: 'Card', CREDIT: 'Invoice',
+  WALLET: 'Wallet',
+  CASH:   'Cash on Delivery',
+  MPESA:  'M-Pesa',
+  CARD:   'Card',
+  CREDIT: 'Invoice',
+  CHEQUE: 'Cheque',
 };
 
 const PAYMENT_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
@@ -129,28 +121,12 @@ const PAYMENT_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 const ORDER_TYPE_LABELS: Record<string, string> = {
-  REFILL: 'Refill', NEW_BOTTLE: 'New Bottle', MIXED: 'Mixed',
+  REFILL:     'Refill',
+  NEW_BOTTLE: 'New Bottle',
+  MIXED:      'Mixed',
 };
 
-const DELIVERED_STATUSES = new Set(['DELIVERED', 'COMPLETED']);
-
-// ── Module-level cache ────────────────────────────────────────────────────────
-
-let _cachedSettings: AccountingSettings | null = null;
-
-interface CustomerProfile {
-  name: string;
-  phone?: string;
-}
-let _cachedProfile: CustomerProfile | null = null;
-
-const DEFAULT_SETTINGS: AccountingSettings = {
-  legalName: 'AquaTrack', kraPin: '', vatRegistered: false, vatNumber: '',
-  vatRate: 16, address: '', city: '', phone: '', email: '',
-  invoicePrefix: 'INV', invoiceFooterNote: 'Thank you for your business.',
-  bankName: '', bankAccountNumber: '', bankAccountName: '', bankBranch: '',
-  mpesaPaybill: '', mpesaAccountName: '', mpesaTill: '',
-};
+const RECEIPT_STATUSES = new Set(['DELIVERED', 'COMPLETED']);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -173,36 +149,6 @@ function extractOrders(data: OrderListResponse): OrderResponse[] {
   return [];
 }
 
-/**
- * Build TemplateData from the order + resolved customer info.
- * customerName / customerPhone come from the cached profile fetch.
- */
-function buildReceiptData(
-  order: OrderResponse,
-  customerName = 'Customer',
-  customerPhone?: string,
-): TemplateData {
-  return {
-    invoiceNumber:  order.order_number,
-    date:           order.created_at,
-    status:         order.payment_status === 'PAID' ? 'PAID' : 'ISSUED',
-    customerName,
-    customerPhone,
-    items: order.items.map(item => ({
-      description: item.product_name,
-      quantity:    item.quantity,
-      unitPrice:   parseFloat(item.unit_price),
-      subtotal:    parseFloat(item.subtotal),
-    })),
-    subtotal:      parseFloat(order.subtotal),
-    deliveryFees:  parseFloat(order.delivery_fee),
-    vatAmount:     0,
-    totalAmount:   parseFloat(order.total_amount),
-    paymentMethod: order.payment_method as TemplateData['paymentMethod'],
-    paidAt:        order.paid_at ?? undefined,
-  };
-}
-
 // ── Status Pill ───────────────────────────────────────────────────────────────
 
 const StatusPill: React.FC<{ status: string; size?: 'sm' | 'md' }> = ({ status, size = 'md' }) => {
@@ -216,203 +162,26 @@ const StatusPill: React.FC<{ status: string; size?: 'sm' | 'md' }> = ({ status, 
   );
 };
 
-// ── Receipt Modal (bottom sheet, full sharing) ────────────────────────────────
-//
-// Matches the driver receipt experience:
-//   • WhatsApp  — if customer phone is available
-//   • Print     — always
-//   • PDF       — always
-//   • Done      — close
-
-const ReceiptModal: React.FC<{
-  order:   OrderResponse;
-  onClose: () => void;
-}> = ({ order, onClose }) => {
-  const [settings, setSettings] = useState<AccountingSettings>(_cachedSettings ?? DEFAULT_SETTINGS);
-  const [profile,  setProfile]  = useState<CustomerProfile>(_cachedProfile ?? { name: 'Customer' });
-
-  // Fetch business settings + customer profile (both cached after first load)
-  useEffect(() => {
-    const promises: Promise<void>[] = [];
-
-    if (!_cachedSettings) {
-      promises.push(
-        axiosInstance.get('/customer/settings/')
-          .then(r => { _cachedSettings = r.data; setSettings(r.data); })
-          .catch(() => { /* keep defaults */ }),
-      );
-    }
-
-    if (!_cachedProfile) {
-      promises.push(
-        axiosInstance.get('/customer/profile/')
-          .then(r => {
-            const p: CustomerProfile = {
-              name:  r.data.full_name ?? r.data.name ?? 'Customer',
-              phone: r.data.phone     ?? r.data.phone_number ?? undefined,
-            };
-            _cachedProfile = p;
-            setProfile(p);
-          })
-          .catch(() => { /* keep defaults */ }),
-      );
-    }
-  }, []);
-
-  const receiptData = buildReceiptData(order, profile.name, profile.phone);
-  const totalAmount = parseFloat(order.total_amount);
-
-  const { printRef, handlePrint, handleDownloadPdf, handleWhatsApp, pdfLoading } =
-    useInvoicePrint({
-      invoiceNumber: order.order_number,
-      customerPhone: profile.phone,
-      totalAmount,
-      businessName:  settings.legalName,
-    });
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Bottom sheet */}
-      <div className="relative mt-auto w-full bg-background rounded-t-3xl shadow-2xl flex flex-col max-h-[95vh]">
-
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1 shrink-0">
-          <div className="w-10 h-1 bg-border rounded-full" />
-        </div>
-
-        {/* Header */}
-        <div className="px-5 pt-2 pb-4 shrink-0 border-b border-border/60">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="h-11 w-11 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                <FileText className="h-6 w-6 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-bold text-base">Your Receipt</p>
-                <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                  {order.order_number}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <p className="font-black text-base tabular-nums">
-                KES {totalAmount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-              </p>
-              <button
-                onClick={onClose}
-                className="h-9 w-9 flex items-center justify-center rounded-xl bg-muted/50 hover:bg-muted transition-colors"
-              >
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Scrollable receipt preview */}
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div className="max-w-2xl mx-auto rounded-2xl border border-border/60 bg-white p-6 shadow-sm">
-            <InvoiceTemplate
-              settings={settings}
-              data={receiptData}
-              mode="receipt"
-              printRef={printRef}
-            />
-          </div>
-        </div>
-
-        {/* Off-screen full template for print / PDF rendering */}
-        <div className="absolute -left-[9999px] -top-[9999px] w-[794px] pointer-events-none">
-          <InvoiceTemplate
-            settings={settings}
-            data={receiptData}
-            mode="receipt"
-            printRef={printRef}
-          />
-        </div>
-
-        {/* Action buttons — mirror driver receipt modal */}
-        <div className="px-5 pb-5 pt-4 shrink-0 border-t border-border/40 space-y-2.5">
-
-          {/* WhatsApp — only when customer phone is known */}
-          {profile.phone ? (
-            <button
-              onClick={() => handleWhatsApp(
-                `Order: ${order.order_number}\nTotal: KES ${totalAmount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}\nPayment: ${PAYMENT_LABELS[order.payment_method] ?? order.payment_method}`,
-              )}
-              className="w-full flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors active:scale-[0.98]"
-              style={{ height: '52px' }}
-            >
-              {/* WhatsApp SVG icon */}
-              <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" xmlns="http://www.w3.org/2000/svg">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-              </svg>
-              Send Receipt via WhatsApp
-            </button>
-          ) : (
-            /* Fallback share button when no phone */
-            <button
-              onClick={() => handleWhatsApp()}
-              className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors active:scale-[0.98]"
-              style={{ height: '52px' }}
-            >
-              <Share2 className="h-5 w-5" />
-              Share Receipt
-            </button>
-          )}
-
-          {/* Print + PDF side-by-side */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              onClick={handlePrint}
-              className="flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-muted/30 font-bold text-sm hover:bg-muted transition-colors active:scale-[0.98]"
-              style={{ height: '48px' }}
-            >
-              <Printer className="h-4 w-4" />
-              Print
-            </button>
-
-            <button
-              onClick={handleDownloadPdf}
-              disabled={pdfLoading}
-              className="flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors active:scale-[0.98] dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 disabled:opacity-50"
-              style={{ height: '48px' }}
-            >
-              <Download className="h-4 w-4" />
-              {pdfLoading ? 'Generating…' : 'Save PDF'}
-            </button>
-          </div>
-
-          {/* Done */}
-          <button
-            onClick={onClose}
-            className="w-full rounded-2xl border-2 border-border/60 font-bold text-sm text-muted-foreground hover:bg-muted/50 transition-colors active:scale-[0.98]"
-            style={{ height: '48px' }}
-          >
-            Done
-          </button>
-        </div>
-
-        <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
-      </div>
-    </div>
-  );
-};
-
 // ── Order Detail Dialog ───────────────────────────────────────────────────────
 
-const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
+const OrderDetailDialog: React.FC<{
+  order: OrderResponse;
+  onViewReceipt: () => void;
+}> = ({ order, onViewReceipt }) => {
   const payStCfg  = PAYMENT_STATUS_CONFIG[order.payment_status];
   const statusCfg = STATUS_CONFIG[order.status];
-  const [showReceipt, setShowReceipt] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const canViewReceipt = DELIVERED_STATUSES.has(order.status);
+  const canViewReceipt = RECEIPT_STATUSES.has(order.status);
+
+  const handleViewReceipt = () => {
+    setDialogOpen(false);           // close dialog first
+    setTimeout(onViewReceipt, 150); // open receipt after dialog animates out
+  };
 
   return (
     <>
-      <Dialog>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogTrigger asChild>
           <button className="group inline-flex items-center gap-1 text-[11px] font-semibold text-primary/80 hover:text-primary transition-colors">
             View details
@@ -424,7 +193,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
           aria-describedby="order-detail-desc"
           className="max-w-md w-[calc(100vw-1.5rem)] mx-auto rounded-3xl max-h-[92vh] overflow-y-auto p-0 gap-0 shadow-2xl border-0"
         >
-          {/* Header */}
           <div className={`${statusCfg?.bg ?? 'bg-muted/30'} px-6 pt-6 pb-5 rounded-t-3xl border-b border-border/50`}>
             <DialogHeader>
               <DialogTitle className="flex items-start justify-between gap-3">
@@ -444,7 +212,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
 
           <div className="px-6 py-5 space-y-5">
 
-            {/* Meta grid */}
             <div className="grid grid-cols-2 gap-2">
               {([
                 ['Order Type', ORDER_TYPE_LABELS[order.order_type] ?? order.order_type],
@@ -465,7 +232,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
               </div>
             </div>
 
-            {/* Delivery info */}
             {order.delivery && (
               <div className="rounded-2xl border border-border/50 overflow-hidden">
                 <div className="bg-muted/20 px-4 py-3 border-b border-border/40 flex items-center gap-2">
@@ -520,7 +286,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
               </div>
             )}
 
-            {/* Items */}
             <div className="rounded-2xl border border-border/50 overflow-hidden">
               <div className="bg-muted/20 px-4 py-3 border-b border-border/40 flex items-center gap-2">
                 <div className="h-6 w-6 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -553,7 +318,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
               </div>
             </div>
 
-            {/* Bill summary */}
             <div className="rounded-2xl border border-border/50 overflow-hidden">
               <div className="divide-y divide-border/40 text-sm">
                 <div className="flex justify-between px-4 py-3">
@@ -577,7 +341,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
               </div>
             </div>
 
-            {/* Special instructions */}
             {order.special_instructions && (
               <div className="flex gap-3 p-4 rounded-2xl bg-amber-50/80 border border-amber-100">
                 <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
@@ -588,13 +351,13 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
               </div>
             )}
 
-            {/* ── View / Print Receipt — delivered orders only ── */}
+            {/* ── Receipt button — same style as DriverHistoryPage ── */}
             {canViewReceipt && (
               <button
-                onClick={() => setShowReceipt(true)}
-                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-primary/5 border border-primary/30 text-primary font-bold text-sm hover:bg-primary/10 transition-colors active:scale-[0.98]"
+                onClick={handleViewReceipt}
+                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-sm hover:bg-emerald-100 transition-colors active:scale-[0.98] dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300"
               >
-                <FileText className="h-4 w-4" />
+                <Receipt className="h-4 w-4" />
                 View / Download Receipt
               </button>
             )}
@@ -602,14 +365,6 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Full receipt modal — outside Dialog to avoid z-index clash */}
-      {showReceipt && (
-        <ReceiptModal
-          order={order}
-          onClose={() => setShowReceipt(false)}
-        />
-      )}
     </>
   );
 };
@@ -618,11 +373,14 @@ const OrderDetailDialog: React.FC<{ order: OrderResponse }> = ({ order }) => {
 
 const OrderCard: React.FC<{ order: OrderResponse }> = ({ order }) => {
   const cfg = STATUS_CONFIG[order.status];
+  const [showReceipt, setShowReceipt] = useState(false);
+
   const itemSummary = order.items
     .map(i => `${i.product_name || 'Item'} ×${i.quantity}`)
     .join(' · ');
 
   return (
+  <>
     <div className="group bg-card border border-border/60 rounded-2xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:border-border">
       <div className="flex">
         <div className={`w-1 shrink-0 ${cfg?.accent ?? 'bg-border'}`} />
@@ -672,12 +430,22 @@ const OrderCard: React.FC<{ order: OrderResponse }> = ({ order }) => {
               <p className="font-bold text-lg leading-none tabular-nums">
                 KES {parseFloat(order.total_amount).toLocaleString()}
               </p>
-              <OrderDetailDialog order={order} />
+              <OrderDetailDialog order={order} onViewReceipt={() => setShowReceipt(true)} />
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    {/* Receipt modal lives here — outside Dialog, no z-index conflict */}
+    {showReceipt && (
+      <CustomerReceiptModal
+        open={showReceipt}
+        onClose={() => setShowReceipt(false)}
+        order={order as unknown as CustomerOrderForReceipt}
+      />
+    )}
+  </>
   );
 };
 

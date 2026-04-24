@@ -1,7 +1,7 @@
 # apps/accounts/urls.py
 
 from django.urls import path
-from apps.accounts.views import AccountingSettingsView, DirectSalesView
+from apps.accounts.views import AccountingSettingsView, CustomerAccountingSettingsView, DirectSalesView
 
 urlpatterns = [
     path(
@@ -14,4 +14,6 @@ urlpatterns = [
         DirectSalesView.as_view(),
         name='direct-sales',
     ),
+    path('accounting-settings/', CustomerAccountingSettingsView.as_view(),
+         name='customer-accounting-settings'),
 ]

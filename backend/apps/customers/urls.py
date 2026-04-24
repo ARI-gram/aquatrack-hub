@@ -23,7 +23,7 @@ from apps.orders.views import (
 )
 from apps.products.views import CustomerProductListView
 from apps.deliveries.views import CustomerOrderTrackingView
-
+from apps.accounts.views import CustomerAccountingSettingsView
 app_name = 'customers'
 
 # Router for customer self-service address ViewSet
@@ -70,4 +70,7 @@ urlpatterns = [
 
     # Bottles
     path('bottles/', include('apps.bottles.urls')),
+
+    path('accounting-settings/', CustomerAccountingSettingsView.as_view(),
+         name='customer-accounting-settings'),
 ]
