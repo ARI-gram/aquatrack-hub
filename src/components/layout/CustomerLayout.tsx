@@ -3,10 +3,11 @@
  * Responsive: desktop sidebar + mobile bottom nav
  *
  * Changes in this revision:
- *  - Mobile sidebar is now a left-side drawer (translate-based), matching AppSidebar pattern
- *  - Bottom nav shows primary 5 items; "More" button opens the left drawer
- *  - mobileOpen state lifted into CustomerLayout
- *  - Desktop sidebar, all nav routes, isActive(), header, and page content unchanged
+ *  - NotificationBell now renders unconditionally, matching DriverLayout,
+ *    AccountantLayout, and DashboardLayout — the `bellReady` localStorage
+ *    guard has been removed because the bell's own useNotifications hook
+ *    handles the auth check internally.
+ *  - Everything else (drawer, bottom nav, sidebar) is unchanged.
  */
 
 import React, { useState } from 'react';
@@ -80,9 +81,6 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
   const initials    = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('') || '?';
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Customer';
   const handleBack  = () => { if (onBack) onBack(); else navigate(-1); };
-
-  const bellReady = !!user && user.role === 'customer'
-    && !!localStorage.getItem('aquatrack_token');
 
   const overflowIsActive = overflowItems.some(item => isActive(item.path));
   const hasOverflow      = overflowItems.length > 0;
@@ -250,7 +248,8 @@ export const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
-            {bellReady && <NotificationBell />}
+            {/* ── Bell renders unconditionally — same as every other layout ── */}
+            <NotificationBell />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
