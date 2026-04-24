@@ -51,7 +51,7 @@ urlpatterns = [
     path('credit/grace-request/',
          CustomerGraceRequestView.as_view(), name='grace-request'),
 
-    # Orders  ← customer-facing order endpoints
+    # Orders ← customer-facing order endpoints
     path('orders/', OrderListView.as_view(), name='order-list'),
     path('orders/create/', OrderCreateView.as_view(), name='order-create'),
     path('orders/<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
@@ -59,9 +59,15 @@ urlpatterns = [
     path('orders/<int:order_id>/track/',
          CustomerOrderTrackingView.as_view(), name='order-track'),
 
-    # Products  ← customer-facing product list (active products only)
+    # Products ← customer-facing product list (active products only)
     path('products/', CustomerProductListView.as_view(), name='customer-products'),
 
     # Addresses (ViewSet)
     path('', include(router.urls)),
+
+    # Wallet
+    path('wallet/', include('apps.wallet.urls')),
+
+    # Bottles
+    path('bottles/', include('apps.bottles.urls')),
 ]

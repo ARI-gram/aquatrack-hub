@@ -1,13 +1,12 @@
 from django.urls import path
 from apps.bottles.views import (
     BottleInventoryView,
-    BottleTransactionListView
+    BottleTransactionListView,
 )
 
 app_name = 'bottles'
 
 urlpatterns = [
-    # Bottle inventory
-    path('inventory', BottleInventoryView.as_view(), name='inventory'),
-    path('transactions', BottleTransactionListView.as_view(), name='transactions'),
+    path('inventory/', BottleInventoryView.as_view(), name='inventory'),
+    path('transactions/', BottleTransactionListView.as_view(), name='transactions'),
 ]

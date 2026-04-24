@@ -260,7 +260,7 @@ const OrderTrackingPage: React.FC = () => {
     if (!quiet) setLoading(true);
     else setRefreshing(true);
     try {
-      const res = await axiosInstance.get<TrackingData>(`/api/customer/orders/${id}/track/`);
+      const res = await axiosInstance.get<TrackingData>(`/customer/orders/${id}/track/`);
       setData(res.data);
     } catch {
       if (!quiet) toast.error('Could not load tracking information.');

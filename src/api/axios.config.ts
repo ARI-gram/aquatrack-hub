@@ -76,16 +76,18 @@ axiosInstance.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
 
+      // ✅ Customers use OTP auth — staff refresh endpoint will always reject
+      // their tokens. Skip the refresh attempt and redirect immediately.
+      const role = getStoredRole();
+      if (role === 'customer') {
+        return Promise.reject(error); 
+      }
+
       const refreshToken = localStorage.getItem('aquatrack_refresh_token');
 
       if (refreshToken) {
-        // Read role BEFORE clearing anything
-        const role       = getStoredRole();
-        const isCustomer = role === 'customer';
-
         try {
           const refreshUrl = `${import.meta.env.VITE_API_BASE_URL || '/api'}/auth/refresh-token/`;
-
           const response = await axios.post(refreshUrl, { refresh: refreshToken });
           const { access } = response.data;
           localStorage.setItem('aquatrack_token', access);
@@ -95,16 +97,12 @@ axiosInstance.interceptors.response.use(
           }
           return axiosInstance(originalRequest);
         } catch {
-          // Refresh failed — clear then navigate softly (no hard reload)
           clearSession();
-          dispatchSessionExpired(isCustomer);
+          dispatchSessionExpired(false);
         }
       } else {
-        // No refresh token
-        const role       = getStoredRole();
-        const isCustomer = role === 'customer';
         clearSession();
-        dispatchSessionExpired(isCustomer);
+        dispatchSessionExpired(false);
       }
     }
 

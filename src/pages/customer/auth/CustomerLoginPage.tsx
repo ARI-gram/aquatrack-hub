@@ -87,6 +87,7 @@ const CustomerLoginPage: React.FC = () => {
         otp_code: otp,
       });
 
+      
       localStorage.removeItem('aquatrack_token');
       localStorage.removeItem('aquatrack_refresh_token');
       localStorage.removeItem('aquatrack_user');
@@ -110,6 +111,7 @@ const CustomerLoginPage: React.FC = () => {
 
       localStorage.setItem('customer_data', JSON.stringify(data.customer));
 
+      // loginAsCustomer writes the tokens — nothing should clear after this
       justLoggedIn.current = true;
       loginAsCustomer(customerUser, data.tokens.access, data.tokens.refresh);
 
