@@ -18,7 +18,7 @@ from rest_framework import permissions
 
 from apps.authentication.models import User
 from apps.deliveries.models import Delivery
-from apps.products.models import BottleMovement  # moved to top-level import
+from apps.products.models import BottleMovement
 
 
 # ── Permission ────────────────────────────────────────────────────────────────
@@ -35,40 +35,6 @@ class IsClientAdminOrAccountant(permissions.BasePermission):
 # ── View ──────────────────────────────────────────────────────────────────────
 
 class DriverBottleAuditView(APIView):
-    """
-    Returns a per-driver bottle audit summary for a given period.
-
-    Response shape:
-    {
-        "period":    "month",
-        "date_from": "2026-04-01",
-        "date_to":   "2026-04-30",
-        "drivers": [
-            {
-                "driver_id":          "uuid",
-                "driver_name":        "John Kamau",
-                "vehicle_number":     "KBZ 123A",
-                "total_deliveries":   42,
-                "pending_deliveries": 3,
-                "bottles_delivered":  120,
-                "bottles_to_collect": 115,
-                "bottles_collected":  108,
-                "shortfall":          7,
-                "damages":            2
-            },
-            ...
-        ],
-        "totals": {
-            "total_deliveries":   ...,
-            "bottles_delivered":  ...,
-            "bottles_to_collect": ...,
-            "bottles_collected":  ...,
-            "shortfall":          ...,
-            "damages":            ...
-        }
-    }
-    """
-
     permission_classes = [IsClientAdminOrAccountant]
 
     def get(self, request):
@@ -93,7 +59,7 @@ class DriverBottleAuditView(APIView):
         except ValueError:
             date_to = now
 
-        # ── Compute a human-readable period label ─────────────────────────────
+        # ── Period label ──────────────────────────────────────────────────────
         delta = (date_to.date() - date_from.date()).days
         if delta == 0:
             period_label = 'day'
@@ -106,7 +72,7 @@ class DriverBottleAuditView(APIView):
         else:
             period_label = 'custom'
 
-        # ── Scope to this client ──────────────────────────────────────────────
+        # ── Drivers queryset ──────────────────────────────────────────────────
         client = request.user.client
         driver_id = request.query_params.get('driver_id')
 
@@ -135,7 +101,6 @@ class DriverBottleAuditView(APIView):
 
             bottles_delivered = 0
             bottles_to_collect = 0
-            damages = 0
 
             for delivery in completed.prefetch_related('order__items'):
                 try:
@@ -149,22 +114,7 @@ class DriverBottleAuditView(APIView):
                 except Exception:
                     pass
 
-                # Count flagged delivery incidents as damages
-                if delivery.has_issues:
-                    damages += 1
-
-            # ── Pull RECEIVE_EMPTY movements for this driver in the audit period ──
-            #
-            # FIX: bottles_collected is the SUM of qty_good across all
-            # RECEIVE_EMPTY movements in the period — regardless of who
-            # recorded them (road self-record vs office handover).
-            #
-            # The old code calculated  road_collected - office_good - office_damaged
-            # which is the driver's *current balance*, not what was collected.
-            #
-            # NOTE: filter by created_at (or whichever timestamp field your
-            # BottleMovement model uses — adjust the field name if needed).
-
+            # ── Bottle movements for this driver in the period ────────────────
             agg = BottleMovement.objects.filter(
                 driver=driver,
                 movement_type='RECEIVE_EMPTY',
@@ -176,8 +126,7 @@ class DriverBottleAuditView(APIView):
             )
 
             bottles_collected = agg['good'] or 0
-            # Optionally surface bottle-level damage count separately:
-            # bottle_damages = agg['damaged'] or 0
+            bottle_damages = agg['damaged'] or 0  # ← the fix
 
             shortfall = max(0, bottles_to_collect - bottles_collected)
 
@@ -191,7 +140,7 @@ class DriverBottleAuditView(APIView):
                 'bottles_to_collect': bottles_to_collect,
                 'bottles_collected':  bottles_collected,
                 'shortfall':          shortfall,
-                'damages':            damages,
+                'damages':            bottle_damages,  # ← was using has_issues count
             })
 
         totals = {

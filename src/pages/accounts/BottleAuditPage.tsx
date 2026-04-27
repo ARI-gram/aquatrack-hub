@@ -155,6 +155,7 @@ const BottleAuditPage: React.FC = () => {
   const price      = parseFloat(bottlePrice) || 0;
   const totals     = data?.totals;
   const estLoss    = totals ? totals.shortfall * price : 0;
+  const estDamagesLoss = totals ? totals.damages * price : 0;
   const returnRate = totals && totals.bottles_to_collect > 0
     ? Math.round((totals.bottles_collected / totals.bottles_to_collect) * 100)
     : 100;
@@ -288,7 +289,7 @@ const BottleAuditPage: React.FC = () => {
               <StatCard label="Bottles Delivered" value={totals.bottles_delivered.toLocaleString()} icon={<ArrowUpCircle className="h-5 w-5 text-blue-600" />} color="bg-blue-50" sub={`${totals.total_deliveries} deliveries`} />
               <StatCard label="Empty Returns" value={totals.bottles_collected.toLocaleString()} icon={<ArrowDownCircle className="h-5 w-5 text-emerald-600" />} color="bg-emerald-50" sub={`${returnRate}% return rate`} />
               <StatCard label="Shortfall" value={totals.shortfall.toLocaleString()} icon={<TrendingDown className="h-5 w-5 text-red-600" />} color="bg-red-50" sub={`Est. KES ${estLoss.toLocaleString()} loss`} />
-              <StatCard label="Damage Incidents" value={totals.damages.toLocaleString()} icon={<AlertTriangle className="h-5 w-5 text-amber-600" />} color="bg-amber-50" sub="flagged deliveries" />
+              <StatCard label="Damage Incidents" value={totals.damages.toLocaleString()} icon={<AlertTriangle className="h-5 w-5 text-amber-600" />} color="bg-amber-50" sub={`Est. KES ${(totals.damages * price).toLocaleString()} loss`} />
             </>
           ) : null}
         </div>
@@ -311,7 +312,7 @@ const BottleAuditPage: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/40 bg-muted/10">
-                  {['Driver','Vehicle','Deliveries','Pending','Delivered','Expected Returns','Actual Returns','Shortfall','Damages','Est. Loss (KES)'].map(h => (
+                  {['Driver','Vehicle','Deliveries','Pending','Delivered','Expected Returns','Actual Returns','Shortfall','Damages','Damages Cost (KES)','Est. Loss (KES)'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wider text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -383,6 +384,12 @@ const BottleAuditPage: React.FC = () => {
                             ) : <span className="text-muted-foreground text-xs">—</span>}
                           </td>
                           <td className="px-4 py-3">
+                            {hasDamages
+                              ? <span className="font-bold text-amber-700">KES {(row.damages * price).toLocaleString()}</span>
+                              : <span className="text-muted-foreground text-xs">—</span>
+                            }
+                          </td>                          
+                          <td className="px-4 py-3">
                             {driverLoss > 0
                               ? <span className="font-bold text-red-700">KES {driverLoss.toLocaleString()}</span>
                               : <span className="text-emerald-600 text-xs font-semibold">KES 0</span>
@@ -401,6 +408,7 @@ const BottleAuditPage: React.FC = () => {
                         <td className="px-4 py-3">{totals.bottles_collected}</td>
                         <td className="px-4 py-3 text-red-700">{totals.shortfall}</td>
                         <td className="px-4 py-3 text-amber-700">{totals.damages}</td>
+                        <td className="px-4 py-3 text-amber-700">KES {estDamagesLoss.toLocaleString()}</td> 
                         <td className="px-4 py-3 text-red-700">KES {estLoss.toLocaleString()}</td>
                       </tr>
                     )}
@@ -417,7 +425,7 @@ const BottleAuditPage: React.FC = () => {
             { color: 'bg-blue-500',    text: 'Bottles Delivered = total units sent out in completed deliveries' },
             { color: 'bg-emerald-500', text: 'Actual Returns = empty bottles physically collected back' },
             { color: 'bg-red-500',     text: 'Shortfall = Expected Returns − Actual Returns' },
-            { color: 'bg-amber-500',   text: 'Damages = deliveries flagged with issues' },
+            { color: 'bg-amber-500', text: 'Damages = damaged bottles (qty) × bottle price' }
           ].map(({ color, text }) => (
             <span key={text} className="flex items-center gap-1.5">
               <span className={cn('h-2 w-2 rounded-full shrink-0', color)} />{text}
